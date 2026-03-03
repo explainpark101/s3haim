@@ -6,6 +6,7 @@ import {
   IconFileCode,
   IconFileJson,
   IconImage,
+  IconMusic,
   IconVideo,
   IconFolder,
   IconTrash,
@@ -62,15 +63,37 @@ export default function TreeNode({
     const ext = lastDot > -1 ? lower.slice(lastDot + 1) : '';
     const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'];
     const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'mkv'];
+    const audioExts = ['m4a', 'mp3', 'wav', 'ogg', 'aac', 'flac', 'weba'];
 
     if (imageExts.includes(ext)) return IconImage;
     if (videoExts.includes(ext)) return IconVideo;
+    if (audioExts.includes(ext)) return IconMusic;
     if (ext === 'pdf') return IconFileJson;
     if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return IconFileCode;
     return IconFile;
   };
 
+  const getIconColorClass = () => {
+    if (node.type === 'folder') {
+      if (isTrashRoot) return 'text-red-600 dark:text-red-400';
+      return 'text-yellow-600 dark:text-yellow-400';
+    }
+    const lower = node.name.toLowerCase();
+    const lastDot = lower.lastIndexOf('.');
+    const ext = lastDot > -1 ? lower.slice(lastDot + 1) : '';
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'];
+    const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'mkv'];
+    const audioExts = ['m4a', 'mp3', 'wav', 'ogg', 'aac', 'flac', 'weba'];
+    if (imageExts.includes(ext)) return 'text-green-600 dark:text-green-400';
+    if (videoExts.includes(ext)) return 'text-orange-600 dark:text-orange-400';
+    if (audioExts.includes(ext)) return 'text-purple-600 dark:text-purple-400';
+    if (ext === 'pdf') return 'text-red-500 dark:text-red-400';
+    if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'text-gray-600 dark:text-gray-100';
+    return 'text-blue-600 dark:text-blue-400';
+  };
+
   const FileIconComponent = getFileIcon();
+  const iconColorClass = getIconColorClass();
 
   useEffect(() => {
     if (node.type !== 'folder') return;
@@ -214,7 +237,7 @@ export default function TreeNode({
           <span className="text-gray-400 dark:text-gray-500 w-4 flex justify-center shrink-0">
             {node.type === 'folder' ? (isOpen ? <IconChevronDown /> : <IconChevronRight />) : null}
           </span>
-          <span className="text-gray-500 dark:text-gray-300 shrink-0">
+          <span className={`${iconColorClass} shrink-0`}>
             {node.type === 'folder'
               ? isTrashRoot
                 ? <IconTrash />

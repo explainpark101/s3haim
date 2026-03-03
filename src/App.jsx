@@ -877,24 +877,28 @@ export default function App() {
     const isInTrash = node.path.startsWith('.trash/');
     const isFolder = node.type === 'folder';
     const isTrashRoot = node.path === '.trash/';
-    const startedAt = Date.now();
+
+    const closeModal = () => setDeleteTarget(null);
+    const closeTimer = setTimeout(closeModal, 3000);
 
     // 쓰레기통 루트는 실제 삭제 수행하지 않음
     if (isTrashRoot) {
       setOperationStatus('쓰레기통 비우기 요청: 실제 파일은 삭제되지 않습니다.');
-      setDeleteTarget(null);
+      clearTimeout(closeTimer);
+      closeModal();
       return;
     }
 
     if (isFolder) {
       if (isDeletingFolder) {
+        clearTimeout(closeTimer);
         return;
       }
       setIsDeletingFolder(true);
       setDeletingFolderPath(node.path);
       setOperationStatus(`폴더 삭제 중: ${node.path}`);
     }
-    
+
     try {
       if (type === 's3') {
         const s3 = getS3Client();
@@ -942,21 +946,14 @@ export default function App() {
         setOperationStatus(`폴더 삭제 실패: ${e.message}`);
       }
     } finally {
+      clearTimeout(closeTimer);
+      closeModal();
       if (isFolder) {
-        const elapsed = Date.now() - startedAt;
-        const closeModal = () => setDeleteTarget(null);
-        if (elapsed < 3000) {
-          setTimeout(closeModal, 3000 - elapsed);
-        } else {
-          closeModal();
-        }
         setIsDeletingFolder(false);
         setDeletingFolderPath(null);
         if (!operationStatus.startsWith('폴더 삭제 실패')) {
           setOperationStatus(`폴더 삭제 완료: ${node.path}`);
         }
-      } else {
-        setDeleteTarget(null);
       }
     }
   };

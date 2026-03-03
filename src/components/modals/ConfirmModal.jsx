@@ -9,8 +9,6 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
 }) {
-  if (!isOpen) return null;
-
   return (
     <Modal isOpen={isOpen}>
       <div className="p-6">

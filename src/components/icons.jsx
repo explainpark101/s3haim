@@ -22,6 +22,7 @@ import {
   FileCode,
   FileJson,
   RotateCw,
+  Music2,
 } from 'lucide-react';
 
 export const IconFolder = ({ size = 16, ...props }) => <Folder size={size} {...props} />;
@@ -46,3 +47,4 @@ export const IconVideo = ({ size = 14, ...props }) => <VideoIcon size={size} {..
 export const IconFileCode = ({ size = 14, ...props }) => <FileCode size={size} {...props} />;
 export const IconFileJson = ({ size = 14, ...props }) => <FileJson size={size} {...props} />;
 export const IconRefresh = ({ size = 14, ...props }) => <RotateCw size={size} {...props} />;
+export const IconMusic = ({ size = 14, ...props }) => <Music2 size={size} {...props} />;

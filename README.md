@@ -1,16 +1,18 @@
-# React + Vite
+# S3HAIM
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**S3에 저장하는 마크다운 메모 앱**입니다.
 
-Currently, two official plugins are available:
+## 이 앱은 무엇인가요?
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+S3HAIM은 **마크다운**으로 메모를 작성하고, 그 내용을 **Amazon S3**에 저장하는 웹 앱입니다.
 
-## React Compiler
+- **마크다운 에디터**: 제목, 굵은 글씨, 링크, 목록 등을 간단한 문법으로 적을 수 있는 에디터로 메모를 씁니다.
+- **S3 저장**: 작성한 메모는 Amazon S3(클라우드 저장소)에 저장되어, 나중에 다른 기기에서도 불러와 볼 수 있습니다.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+메모를 트리(폴더 구조)처럼 정리할 수 있고, 설정에서 S3 버킷 정보를 입력해 본인의 S3에 연결해 사용할 수 있습니다.
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# 추후 업데이트 사항
+- IndexedDB활용 (dexie.js 활용)
+- 노트 녹음 기능
+- 기타 파일 업로드 기능
+- 모바일 지원

@@ -1,12 +1,26 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { IconTrash } from '@/components/icons';
 import Modal from '@/components/modals/Modal';
 
-export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing = false }) {
-  if (!target) return null;
+const CLOSE_ANIMATION_MS = 200;
 
-  const isInTrash = target.node.path?.startsWith('.trash/');
-  const isTrashRoot = target.node.path === '.trash/';
+export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing = false }) {
+  const [displayTarget, setDisplayTarget] = useState(null);
+
+  useEffect(() => {
+    if (target) {
+      setDisplayTarget(target);
+    } else if (displayTarget) {
+      const t = setTimeout(() => setDisplayTarget(null), CLOSE_ANIMATION_MS);
+      return () => clearTimeout(t);
+    }
+  }, [target, displayTarget]);
+
+  if (!target && !displayTarget) return null;
+
+  const data = target || displayTarget;
+  const isInTrash = data.node.path?.startsWith('.trash/');
+  const isTrashRoot = data.node.path === '.trash/';
 
   return (
     <Modal isOpen={!!target}>
@@ -25,10 +39,10 @@ export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing =
             </>
           ) : (
             <>
-              <span className="font-semibold text-red-600">{target.node.name}</span>{' '}
+              <span className="font-semibold text-red-600">{data.node.name}</span>{' '}
               {isInTrash ? '항목을 영구적으로 삭제합니다.' : '항목을 쓰레기통으로 이동합니다.'}
               <br />
-              {target.node.type === 'folder' &&
+              {data.node.type === 'folder' &&
                 (isInTrash
                   ? '해당 폴더 내의 모든 파일이 함께 삭제됩니다. '
                   : '해당 폴더 내의 모든 파일이 함께 이동됩니다. ')}
@@ -48,7 +62,7 @@ export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing =
           <button
             type="button"
             onClick={isProcessing ? undefined : onConfirm}
-            disabled={isProcessing}
+            disabled={isProcessing || !target}
             className={`px-4 py-2 text-sm font-medium text-white rounded transition ${
               isProcessing
                 ? 'bg-red-400 cursor-wait'

@@ -71,7 +71,7 @@ export function MoveFileModal({
   onClose,
   onConfirm,
 }) {
-  if (!isOpen || !currentFile) return null;
+  if (!currentFile) return null;
 
   const isS3 = storageType === 's3';
   const tree = isS3 ? s3Tree : localTree;
