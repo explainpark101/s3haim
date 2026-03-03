@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "tailwindcss-responsive-darkmode",
+  "owner": "josiahsiegel",
+  "repo": "claude-plugin-marketplace",
+  "path": "plugins/tailwindcss-master/skills/tailwindcss-responsive-darkmode",
+  "branch": "main",
+  "sha": "fbbecc53d99d5bd8044916dc22a81b0554df1937",
+  "source": "manual"
+}

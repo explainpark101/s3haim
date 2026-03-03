@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "react-router-data-mode": {
+      "source": "remix-run/agent-skills",
+      "sourceType": "github",
+      "computedHash": "cbbe1b1cfa8f6ceae1ab26d26b38c612279c9c272cf956471838796d85659860"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+import React from 'react';
+import {
+  Folder,
+  Cloud,
+  FileText,
+  Settings,
+  Save,
+  Plus,
+  Trash2,
+  ChevronRight,
+  ChevronDown,
+  FolderPlus,
+  FilePlus,
+  Lock,
+  Download,
+  Upload,
+  Key,
+  Sun,
+  Moon,
+} from 'lucide-react';
+
+export const IconFolder = ({ size = 16, ...props }) => <Folder size={size} {...props} />;
+export const IconCloud = ({ size = 16, ...props }) => <Cloud size={size} {...props} />;
+export const IconFile = ({ size = 16, ...props }) => <FileText size={size} {...props} />;
+export const IconSettings = ({ size = 20, ...props }) => <Settings size={size} {...props} />;
+export const IconSave = ({ size = 18, ...props }) => <Save size={size} {...props} />;
+export const IconPlus = ({ size = 14, ...props }) => <Plus size={size} {...props} />;
+export const IconTrash = ({ size = 14, ...props }) => <Trash2 size={size} {...props} />;
+export const IconChevronRight = ({ size = 14, ...props }) => <ChevronRight size={size} {...props} />;
+export const IconChevronDown = ({ size = 14, ...props }) => <ChevronDown size={size} {...props} />;
+export const IconFolderPlus = ({ size = 14, ...props }) => <FolderPlus size={size} {...props} />;
+export const IconFilePlus = ({ size = 14, ...props }) => <FilePlus size={size} {...props} />;
+export const IconLock = ({ size = 16, ...props }) => <Lock size={size} {...props} />;
+export const IconDownload = ({ size = 14, ...props }) => <Download size={size} {...props} />;
+export const IconUpload = ({ size = 14, ...props }) => <Upload size={size} {...props} />;
+export const IconKey = ({ size = 16, ...props }) => <Key size={size} {...props} />;
+export const IconSun = ({ size = 16, ...props }) => <Sun size={size} {...props} />;
+export const IconMoon = ({ size = 16, ...props }) => <Moon size={size} {...props} />;
+
