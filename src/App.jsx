@@ -77,6 +77,17 @@ export default function App() {
   }, [currentFile]);
 
   useEffect(() => {
+    if (currentFile) {
+      const fileName = currentFile.name
+        || (typeof currentFile.id === 'string' && currentFile.id.split('/').filter(Boolean).pop())
+        || 'Untitled';
+      document.title = `s3Haim - ${fileName}`;
+    } else {
+      document.title = 's3Haim';
+    }
+  }, [currentFile]);
+
+  useEffect(() => {
     const mql = window.matchMedia('(max-width: 768px)');
     const handler = () => setIsMobile(mql.matches);
     mql.addEventListener('change', handler);
