@@ -17,7 +17,7 @@ export default function MarkdownEditor({ value, onChange, theme = 'light' }) {
     <MdEditor
       modelValue={value}
       onChange={onChange}
-      className="h-full!"
+      className="h-full! max-h-dvh"
       // previewTheme="github"
       theme={theme}
       language="ko-KR"

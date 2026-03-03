@@ -8,6 +8,8 @@ import EditorPane from '@/components/EditorPane';
 import { AuthModal } from '@/components/modals/AuthModal';
 import { SetPasswordModal } from '@/components/modals/SetPasswordModal';
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal';
+import { ConfirmModal } from '@/components/modals/ConfirmModal';
+import { MoveFileModal } from '@/components/modals/MoveFileModal';
 import SettingsPage from '@/pages/SettingsPage';
 
 export default function App() {
@@ -44,8 +46,58 @@ export default function App() {
   const [lastInputAt, setLastInputAt] = useState(null);
   const [lastAutoSaveAt, setLastAutoSaveAt] = useState(null);
   const [lastAutoSyncAt, setLastAutoSyncAt] = useState(null);
+  const [showHiddenFolders, setShowHiddenFolders] = useState(false);
 
   const fileInputRef = useRef(null);
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const sidebarResizeStateRef = useRef({
+    isResizing: false,
+    startX: 0,
+    startWidth: 260,
+  });
+  const [deletingFolderPath, setDeletingFolderPath] = useState(null);
+  const [isDeletingFolder, setIsDeletingFolder] = useState(false);
+  const [operationStatus, setOperationStatus] = useState('');
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+
+  const handleSidebarResizeMouseDown = (e) => {
+    e.preventDefault();
+    sidebarResizeStateRef.current = {
+      isResizing: true,
+      startX: e.clientX,
+      startWidth: sidebarWidth,
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      const state = sidebarResizeStateRef.current;
+      if (!state.isResizing) return;
+      const delta = e.clientX - state.startX;
+      const nextWidth = Math.min(
+        480,
+        Math.max(200, state.startWidth + delta),
+      );
+      setSidebarWidth(nextWidth);
+    };
+
+    const handleMouseUp = () => {
+      if (sidebarResizeStateRef.current.isResizing) {
+        sidebarResizeStateRef.current = {
+          ...sidebarResizeStateRef.current,
+          isResizing: false,
+        };
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -179,7 +231,7 @@ export default function App() {
 
     s3.listObjectsV2({ Bucket: creds.bucket, Prefix: '' }, (err, data) => {
       if (err) return console.error("S3 Load Error:", err);
-      const contents = data.Contents.filter(item => item.Key.endsWith('.md') || item.Key.endsWith('/'));
+      const contents = (data.Contents || []).filter((item) => !!item.Key);
       setS3Tree(buildS3Tree(contents));
     });
   }, [getS3Client, s3Creds]);
@@ -224,19 +276,311 @@ export default function App() {
   // 5. File Read & Save
   const selectFile = async (type, node) => {
     if (node.type === 'folder') return;
+    const ext = (node.name.split('.').pop() || '').toLowerCase();
+
     if (type === 's3') {
       const s3 = getS3Client();
-      s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-        if (err) return console.error("S3 Read Error:", err);
-        const text = new TextDecoder('utf-8').decode(data.Body);
-        setCurrentFile({ type: 's3', id: node.path, name: node.name, content: text });
-        setEditorContent(text);
+      if (!s3) return;
+
+      const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+
+      if (imageExts.includes(ext)) {
+        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
+          if (err) return console.error('S3 Read Error:', err);
+          const mime =
+            ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+          const blob = new Blob([data.Body], { type: mime });
+          const url = URL.createObjectURL(blob);
+
+          setCurrentFile((prev) => {
+            if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
+              URL.revokeObjectURL(prev.objectUrl);
+            }
+            return {
+              type: 's3',
+              id: node.path,
+              name: node.name,
+              viewer: 'image',
+              objectUrl: url,
+              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            };
+          });
+          setEditorContent('');
+          navigate(`/view/${node.path}`);
+        });
+        return;
+      }
+
+      if (ext === 'pdf') {
+        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
+          if (err) return console.error('S3 Read Error:', err);
+          const blob = new Blob([data.Body], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+
+          setCurrentFile((prev) => {
+            if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
+              URL.revokeObjectURL(prev.objectUrl);
+            }
+            return {
+              type: 's3',
+              id: node.path,
+              name: node.name,
+              viewer: 'pdf',
+              objectUrl: url,
+              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            };
+          });
+          setEditorContent('');
+          navigate(`/view/${node.path}`);
+        });
+        return;
+      }
+
+      if (ext === 'md' || ext === 'markdown' || ext === '') {
+        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
+          if (err) return console.error('S3 Read Error:', err);
+          const text = new TextDecoder('utf-8').decode(data.Body);
+          setCurrentFile({
+            type: 's3',
+            id: node.path,
+            name: node.name,
+            content: text,
+            viewer: 'markdown',
+            size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+          });
+          setEditorContent(text);
+          navigate(`/view/${node.path}`);
+        });
+        return;
+      }
+
+      if (ext === 'json') {
+        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
+          if (err) return console.error('S3 Read Error:', err);
+          const raw = new TextDecoder('utf-8').decode(data.Body);
+          const maxFormatLen = 100000;
+          let display = raw;
+          if (raw.length <= maxFormatLen) {
+            try {
+              const parsed = JSON.parse(raw);
+              display = JSON.stringify(parsed, null, 2);
+            } catch {
+              display = raw;
+            }
+          }
+          setCurrentFile({
+            type: 's3',
+            id: node.path,
+            name: node.name,
+            content: display,
+            viewer: 'json',
+            size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+          });
+          setEditorContent(display);
+          navigate(`/view/${node.path}`);
+        });
+        return;
+      }
+
+      const audioExts = ['m4a', 'mp3', 'wav', 'ogg', 'aac', 'flac', 'weba'];
+      const videoExts = ['mp4', 'webm', 'ogv', 'mov'];
+      const isAudio = audioExts.includes(ext);
+      const isVideo = videoExts.includes(ext);
+
+      if (isAudio) {
+        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
+          if (err) return console.error('S3 Read Error:', err);
+          const mime = ext === 'm4a' || ext === 'mp4' ? 'audio/mp4' : ext === 'mp3' ? 'audio/mpeg' : ext === 'ogg' || ext === 'ogv' ? 'audio/ogg' : ext === 'weba' ? 'audio/webm' : `audio/${ext}`;
+          const blob = new Blob([data.Body], { type: mime });
+          const url = URL.createObjectURL(blob);
+          setCurrentFile((prev) => {
+            if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
+              URL.revokeObjectURL(prev.objectUrl);
+            }
+            return {
+              type: 's3',
+              id: node.path,
+              name: node.name,
+              viewer: 'audio',
+              objectUrl: url,
+              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            };
+          });
+          setEditorContent('');
+          navigate(`/view/${node.path}`);
+        });
+        return;
+      }
+
+      if (isVideo) {
+        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
+          if (err) return console.error('S3 Read Error:', err);
+          const mime = ext === 'mp4' || ext === 'mov' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : 'video/ogg';
+          const blob = new Blob([data.Body], { type: mime });
+          const url = URL.createObjectURL(blob);
+          setCurrentFile((prev) => {
+            if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
+              URL.revokeObjectURL(prev.objectUrl);
+            }
+            return {
+              type: 's3',
+              id: node.path,
+              name: node.name,
+              viewer: 'video',
+              objectUrl: url,
+              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            };
+          });
+          setEditorContent('');
+          navigate(`/view/${node.path}`);
+        });
+        return;
+      }
+
+      setCurrentFile({
+        type: 's3',
+        id: node.path,
+        name: node.name,
+        viewer: 'unsupported',
+        size: null,
       });
+      setEditorContent('');
+      navigate(`/view/${node.path}`);
     } else if (type === 'local') {
       const file = await node.handle.getFile();
       const text = await file.text();
-      setCurrentFile({ type: 'local', id: node.path, name: node.name, content: text, handle: node.handle, parentHandle: node.parentHandle });
+      setCurrentFile({
+        type: 'local',
+        id: node.path,
+        name: node.name,
+        content: text,
+        handle: node.handle,
+        parentHandle: node.parentHandle,
+        viewer: 'markdown',
+        size: typeof file.size === 'number' ? file.size : null,
+      });
       setEditorContent(text);
+      navigate(`/view/${node.path}`);
+    }
+  };
+
+  const moveS3FileToFolder = async (file, destFolderPath) => {
+    const s3 = getS3Client();
+    if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+    const bucket = s3Creds.bucket;
+    const fileName = file.name;
+    const destPrefix = destFolderPath || '';
+    const newKey = `${destPrefix}${fileName}`;
+    const oldKey = file.id;
+    if (newKey === oldKey) return file;
+
+    await s3
+      .copyObject({
+        Bucket: bucket,
+        CopySource: `${bucket}/${encodeURIComponent(oldKey)}`,
+        Key: newKey,
+      })
+      .promise();
+
+    await s3
+      .deleteObject({
+        Bucket: bucket,
+        Key: oldKey,
+      })
+      .promise();
+
+    loadS3Files();
+
+    return { ...file, id: newKey };
+  };
+
+  const moveLocalFileToFolder = async (file, destDirHandle, destDirPath) => {
+    const sourceDir = file.parentHandle || localRootHandle;
+    if (!sourceDir) throw new Error('원본 폴더를 찾을 수 없습니다.');
+    if (!destDirHandle) throw new Error('대상 폴더를 찾을 수 없습니다.');
+
+    const fileName = file.name;
+    const oldPath = file.id;
+    const newPath = `${destDirPath || ''}${fileName}`;
+    if (newPath === oldPath) return file;
+
+    const srcFile = await file.handle.getFile();
+    const newFileHandle = await destDirHandle.getFileHandle(fileName, { create: true });
+    const writable = await newFileHandle.createWritable();
+    await writable.write(await srcFile.arrayBuffer());
+    await writable.close();
+
+    await sourceDir.removeEntry(fileName, { recursive: false });
+
+    await refreshLocalTree();
+
+    return {
+      ...file,
+      id: newPath,
+      handle: newFileHandle,
+      parentHandle: destDirHandle,
+      size: typeof srcFile.size === 'number' ? srcFile.size : file.size ?? null,
+    };
+  };
+
+  const handleViewUnsupportedAsText = async () => {
+    if (!currentFile || currentFile.viewer !== 'unsupported') return;
+    if (currentFile.type === 's3') {
+      try {
+        const s3 = getS3Client();
+        if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        const data = await s3
+          .getObject({ Bucket: s3Creds.bucket, Key: currentFile.id })
+          .promise();
+        const raw = data.Body
+          ? new TextDecoder('utf-8').decode(
+              data.Body instanceof Uint8Array ? data.Body : new Uint8Array(data.Body),
+            )
+          : '';
+        const content = raw;
+        setCurrentFile((prev) => ({
+          ...prev,
+          content,
+          viewer: 'raw',
+          size: typeof data.ContentLength === 'number' ? data.ContentLength : prev?.size ?? null,
+        }));
+        setEditorContent(content);
+      } catch (e) {
+        console.error('S3 파일 로드 실패:', e);
+        alert('파일을 텍스트로 불러오지 못했습니다.');
+      }
+    }
+  };
+
+  const handleDownloadCurrentFile = async () => {
+    if (!currentFile) return;
+    if (currentFile.type === 's3') {
+      try {
+        const s3 = getS3Client();
+        if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        const url = s3.getSignedUrl('getObject', {
+          Bucket: s3Creds.bucket,
+          Key: currentFile.id,
+          Expires: 60,
+        });
+        window.open(url, '_blank');
+      } catch (e) {
+        console.error('Signed URL 생성 실패:', e);
+        alert('파일 다운로드 URL을 생성하지 못했습니다.');
+      }
+    } else if (currentFile.type === 'local' && currentFile.handle) {
+      try {
+        const file = await currentFile.handle.getFile();
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = currentFile.name || file.name;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error('로컬 파일 다운로드 실패:', e);
+        alert('다운로드에 실패했습니다.');
+      }
     }
   };
 
@@ -251,6 +595,13 @@ export default function App() {
         const writable = await currentFile.handle.createWritable();
         await writable.write(editorContent);
         await writable.close();
+        const file = await currentFile.handle.getFile();
+        setCurrentFile((prev) => ({
+          ...prev,
+          content: editorContent,
+          size: typeof file.size === 'number' ? file.size : prev?.size ?? null,
+        }));
+        return;
       }
       setCurrentFile(prev => ({ ...prev, content: editorContent }));
     } catch (e) {
@@ -260,14 +611,13 @@ export default function App() {
     }
   };
 
-  const renameS3File = async (file, newTitle) => {
+  const renameS3File = async (file, newName) => {
     const s3 = getS3Client();
     if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
 
     const oldKey = file.id;
     const lastSlash = oldKey.lastIndexOf('/');
     const dirPrefix = lastSlash >= 0 ? oldKey.slice(0, lastSlash + 1) : '';
-    const newName = newTitle.endsWith('.md') ? newTitle : `${newTitle}.md`;
     const newKey = dirPrefix + newName;
 
     if (newKey === oldKey) return file;
@@ -292,14 +642,13 @@ export default function App() {
     return { ...file, id: newKey, name: newName };
   };
 
-  const renameLocalFile = async (file, newTitle) => {
+  const renameLocalFile = async (file, newName) => {
     const pHandle = file.parentHandle || localRootHandle;
     if (!pHandle) throw new Error('루트 폴더를 먼저 열어주세요.');
 
     const oldPath = file.id;
     const lastSlash = oldPath.lastIndexOf('/');
     const dirPrefix = lastSlash >= 0 ? oldPath.slice(0, lastSlash + 1) : '';
-    const newName = newTitle.endsWith('.md') ? newTitle : `${newTitle}.md`;
     const newPath = dirPrefix + newName;
 
     if (newPath === oldPath) return file;
@@ -316,9 +665,9 @@ export default function App() {
     return { ...file, id: newPath, name: newName, handle: newFileHandle };
   };
 
-  const renameCurrentFileTitle = async (newTitle) => {
+  const renameCurrentFileFullName = async (newFullName) => {
     if (!currentFile) return;
-    const trimmed = newTitle.trim();
+    const trimmed = newFullName.trim();
     if (!trimmed) return;
 
     try {
@@ -331,6 +680,25 @@ export default function App() {
       if (updated) {
         setCurrentFile(updated);
       }
+    } catch (e) {
+      alert("이름 변경 실패: " + e.message);
+    }
+  };
+
+  const renameCurrentFileTitle = async (newTitle) => {
+    if (!currentFile) return;
+    const trimmedBase = newTitle.trim();
+    if (!trimmedBase) return;
+
+    const name = currentFile.name || '';
+    const lastDot = name.lastIndexOf('.');
+    const ext = lastDot > 0 ? name.slice(lastDot) : '';
+    const newFullName = `${trimmedBase}${ext}`;
+
+    if (newFullName === name) return;
+
+    try {
+      await renameCurrentFileFullName(newFullName);
     } catch (e) {
       alert("이름 변경 실패: " + e.message);
     }
@@ -355,6 +723,7 @@ export default function App() {
           setCurrentFile({ type: 's3', id: newPath, name: finalName, content: '' });
           setEditorContent('');
           loadS3Files();
+          navigate(`/view/${newPath}`);
         }
       } else if (storageType === 'local') {
         const targetDirHandle = parentDirHandle || localRootHandle;
@@ -364,8 +733,15 @@ export default function App() {
           await targetDirHandle.getDirectoryHandle(finalName, { create: true });
         } else {
           const newFileHandle = await targetDirHandle.getFileHandle(finalName, { create: true });
-          setCurrentFile({ type: 'local', id: newPath, name: finalName, content: '', handle: newFileHandle });
+          setCurrentFile({
+            type: 'local',
+            id: newPath,
+            name: finalName,
+            content: '',
+            handle: newFileHandle,
+          });
           setEditorContent('');
+          navigate(`/view/${newPath}`);
         }
         refreshLocalTree();
       }
@@ -499,6 +875,25 @@ export default function App() {
     if (!deleteTarget) return;
     const { node, type } = deleteTarget;
     const isInTrash = node.path.startsWith('.trash/');
+    const isFolder = node.type === 'folder';
+    const isTrashRoot = node.path === '.trash/';
+    const startedAt = Date.now();
+
+    // 쓰레기통 루트는 실제 삭제 수행하지 않음
+    if (isTrashRoot) {
+      setOperationStatus('쓰레기통 비우기 요청: 실제 파일은 삭제되지 않습니다.');
+      setDeleteTarget(null);
+      return;
+    }
+
+    if (isFolder) {
+      if (isDeletingFolder) {
+        return;
+      }
+      setIsDeletingFolder(true);
+      setDeletingFolderPath(node.path);
+      setOperationStatus(`폴더 삭제 중: ${node.path}`);
+    }
     
     try {
       if (type === 's3') {
@@ -539,11 +934,30 @@ export default function App() {
       if (currentFile && currentFile.id.startsWith(node.path)) {
         setCurrentFile(null);
         setEditorContent('');
+        navigate('/');
       }
     } catch (e) {
       alert("삭제 실패: " + e.message);
+      if (isFolder) {
+        setOperationStatus(`폴더 삭제 실패: ${e.message}`);
+      }
     } finally {
-      setDeleteTarget(null);
+      if (isFolder) {
+        const elapsed = Date.now() - startedAt;
+        const closeModal = () => setDeleteTarget(null);
+        if (elapsed < 3000) {
+          setTimeout(closeModal, 3000 - elapsed);
+        } else {
+          closeModal();
+        }
+        setIsDeletingFolder(false);
+        setDeletingFolderPath(null);
+        if (!operationStatus.startsWith('폴더 삭제 실패')) {
+          setOperationStatus(`폴더 삭제 완료: ${node.path}`);
+        }
+      } else {
+        setDeleteTarget(null);
+      }
     }
   };
 
@@ -552,9 +966,14 @@ export default function App() {
     if (!trimmed) return;
     try {
       if (storageType === 's3') {
-        await renameS3File({ id: node.path, name: node.name }, trimmed);
+        const originalName = node.name || '';
+        const lastDot = originalName.lastIndexOf('.');
+        const ext = lastDot > 0 ? originalName.slice(lastDot) : '';
+        const newName = `${trimmed}${ext}`;
+
+        await renameS3File({ id: node.path, name: node.name }, newName);
         if (currentFile && currentFile.type === 's3' && currentFile.id === node.path) {
-          const updated = await renameS3File(currentFile, trimmed);
+          const updated = await renameS3File(currentFile, newName);
           setCurrentFile(updated);
         }
       } else if (storageType === 'local') {
@@ -564,7 +983,10 @@ export default function App() {
         const oldPath = node.path;
         const lastSlash = oldPath.lastIndexOf('/');
         const dirPrefix = lastSlash >= 0 ? oldPath.slice(0, lastSlash + 1) : '';
-        const newName = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
+        const originalName = node.name || '';
+        const nameLastDot = originalName.lastIndexOf('.');
+        const ext = nameLastDot > 0 ? originalName.slice(nameLastDot) : '';
+        const newName = `${trimmed}${ext}`;
         const newPath = dirPrefix + newName;
 
         if (newPath === oldPath) return;
@@ -592,10 +1014,43 @@ export default function App() {
       alert("이름 변경 실패: " + e.message);
     }
   };
+  const handleRequestMove = () => {
+    if (!currentFile) return;
+    setIsMoveModalOpen(true);
+  };
+
+  const handleConfirmMove = async (dest) => {
+    if (!currentFile || !dest) return;
+    try {
+      if (currentFile.type === 's3') {
+        const updated = await moveS3FileToFolder(currentFile, dest.path || '');
+        if (updated) {
+          setCurrentFile((prev) =>
+            prev && prev.type === 's3' ? { ...prev, id: updated.id } : prev,
+          );
+        }
+      } else if (currentFile.type === 'local') {
+        const updated = await moveLocalFileToFolder(
+          currentFile,
+          dest.handle,
+          dest.path || '',
+        );
+        if (updated) {
+          setCurrentFile(updated);
+        }
+      }
+      setIsMoveModalOpen(false);
+      setOperationStatus(`파일 이동 완료: ${dest.path || ''}${currentFile.name}`);
+    } catch (e) {
+      alert('파일 이동 실패: ' + e.message);
+      setOperationStatus(`파일 이동 실패: ${e.message}`);
+    }
+  };
 
   // 7. Auto Save (S3 only, 5s debounce)
   useEffect(() => {
     if (!currentFile || currentFile.type !== 's3') return;
+    if (currentFile.viewer !== 'markdown') return;
     if (!lastInputAt) return;
 
     const now = Date.now();
@@ -618,6 +1073,7 @@ export default function App() {
   // 8. Auto Sync (S3 only, pull when idle >= 30s, checked 주기적으로)
   useEffect(() => {
     if (!currentFile || currentFile.type !== 's3') return;
+    if (currentFile.viewer !== 'markdown') return;
 
     const interval = setInterval(() => {
       if (!lastInputAt) return;
@@ -674,6 +1130,30 @@ export default function App() {
     return `${hh}:${mm}:${ss}`;
   };
 
+  const formatFileSize = (bytes) => {
+    if (bytes == null || isNaN(bytes)) return '알 수 없음';
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(1)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(1)} GB`;
+  };
+
+  const isS3Current = currentFile?.type === 's3';
+  const hasUnsavedForS3 =
+    isS3Current && currentFile && currentFile.content !== editorContent;
+  const hasAutoSaved = isS3Current && !!lastAutoSaveAt;
+
+  const autoSaveIndicatorClass = !isS3Current
+    ? 'bg-gray-300'
+    : hasUnsavedForS3
+    ? 'bg-yellow-400 animate-pulse'
+    : hasAutoSaved
+    ? 'bg-green-500'
+    : 'bg-gray-400';
+
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-odp-bgSofter text-gray-800 dark:text-odp-fg font-sans relative">
       {/* Hidden file input for import */}
@@ -689,23 +1169,38 @@ export default function App() {
         }`}
       >
         <div className="flex flex-1 min-h-0">
-          <Sidebar
-            s3Tree={s3Tree}
-            s3Bucket={s3Creds.bucket}
-            localTree={localTree}
-            localRootHandle={localRootHandle}
-            currentFile={currentFile}
-            onSelectFile={selectFile}
-            onCreateItem={createItem}
-            onOpenLocalFolder={openLocalFolder}
-            onSetDeleteTarget={setDeleteTarget}
-            onOpenSettings={() => navigate('/settings')}
-            theme={theme}
-            onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-            onRenameItem={renameTreeItem}
-          />
+          <div
+            className="relative h-full shrink-0"
+            style={{ width: `${sidebarWidth}px` }}
+          >
+            <Sidebar
+              s3Tree={s3Tree}
+              s3Bucket={s3Creds.bucket}
+              localTree={localTree}
+              localRootHandle={localRootHandle}
+              currentFile={currentFile}
+              onSelectFile={selectFile}
+              onCreateItem={createItem}
+              onOpenLocalFolder={openLocalFolder}
+              onSetDeleteTarget={setDeleteTarget}
+              onOpenSettings={() => navigate('/settings')}
+              theme={theme}
+              onToggleTheme={() =>
+                setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+              }
+              onRenameItem={renameTreeItem}
+              showHiddenFolders={showHiddenFolders}
+              deletingFolderPath={deletingFolderPath}
+              isDeletingFolder={isDeletingFolder}
+            />
+            <div
+              className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-blue-400/30 dark:hover:bg-blue-400/30"
+              onMouseDown={handleSidebarResizeMouseDown}
+            />
+          </div>
 
           {/* Main Content Routes */}
+          <div className="flex-1 min-w-0 flex flex-col">
           <Routes>
             <Route
               path="/settings"
@@ -722,12 +1217,16 @@ export default function App() {
                   onExportCreds={handleExportCreds}
                   onImportClick={() => fileInputRef.current?.click()}
                   onOpenSetPasswordModal={() => setShowSetPasswordModal(true)}
+                  showHiddenFolders={showHiddenFolders}
+                  onToggleHiddenFolders={() =>
+                    setShowHiddenFolders((prev) => !prev)
+                  }
                   onClose={handleSettingsClose}
                 />
               }
             />
             <Route
-              path="*"
+              path="/view/*"
               element={
                 <EditorPane
                   currentFile={currentFile}
@@ -736,6 +1235,10 @@ export default function App() {
                   onSave={saveFile}
                   isSaving={isSaving}
                   onRenameTitle={renameCurrentFileTitle}
+                  onRenameFullName={renameCurrentFileFullName}
+                  onRequestMove={handleRequestMove}
+                  onViewUnsupportedAsText={handleViewUnsupportedAsText}
+                  onDownloadCurrentFile={handleDownloadCurrentFile}
                   theme={theme}
                   onRequestDelete={() =>
                     setDeleteTarget({
@@ -752,12 +1255,47 @@ export default function App() {
                 />
               }
             />
+            <Route
+              path="/"
+              element={
+                <EditorPane
+                  currentFile={currentFile}
+                  editorContent={editorContent}
+                  onChangeEditor={handleEditorChange}
+                  onSave={saveFile}
+                  isSaving={isSaving}
+                  onRenameTitle={renameCurrentFileTitle}
+                  onRenameFullName={renameCurrentFileFullName}
+                  onRequestMove={handleRequestMove}
+                  onViewUnsupportedAsText={handleViewUnsupportedAsText}
+                  onDownloadCurrentFile={handleDownloadCurrentFile}
+                  theme={theme}
+                  onRequestDelete={() =>
+                    setDeleteTarget(
+                      currentFile
+                        ? {
+                            node: {
+                              path: currentFile?.id,
+                              name: currentFile?.name,
+                              type: 'file',
+                              handle: currentFile?.handle,
+                              parentHandle: currentFile?.parentHandle,
+                            },
+                            type: currentFile?.type,
+                          }
+                        : null,
+                    )
+                  }
+                />
+              }
+            />
           </Routes>
+          </div>
         </div>
 
         {/* Status Bar */}
         <div className="h-7 border-t border-gray-200 dark:border-odp-borderSoft bg-white/90 dark:bg-odp-bgSoft/95 text-[11px] px-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 truncate">
+          <div className="flex items-center gap-3 min-w-0">
             <span className="truncate">
               저장소:{' '}
               {currentFile?.type === 's3'
@@ -767,22 +1305,41 @@ export default function App() {
                 : '없음'}
             </span>
             {currentFile && (
-              <span className="truncate">
-                파일:{' '}
-                {currentFile.type === 's3'
-                  ? currentFile.id
-                  : currentFile.id || currentFile.name}
+              <>
+                <span className="truncate">
+                  파일:{' '}
+                  {currentFile.type === 's3'
+                    ? currentFile.id
+                    : currentFile.id || currentFile.name}
+                </span>
+                <span className="truncate text-gray-500 dark:text-odp-muted">
+                  크기:{' '}
+                  {currentFile.size != null
+                    ? formatFileSize(currentFile.size)
+                    : '알 수 없음'}
+                </span>
+              </>
+            )}
+            {operationStatus && (
+              <span className="truncate text-xs text-gray-500 dark:text-odp-muted">
+                상태: {operationStatus}
               </span>
             )}
           </div>
           <div className="flex items-center gap-4 shrink-0">
-            <span>
-              자동저장(S3):{' '}
-              {currentFile?.type === 's3'
-                ? lastAutoSaveAt
-                  ? `마지막 ${formatTime(lastAutoSaveAt)}`
-                  : '대기 중 (입력 후 5초)'
-                : '대상 아님'}
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${autoSaveIndicatorClass}`}
+                aria-hidden="true"
+              />
+              <span>
+                자동저장(S3):{' '}
+                {currentFile?.type === 's3'
+                  ? lastAutoSaveAt
+                    ? `마지막 ${formatTime(lastAutoSaveAt)}`
+                    : '대기 중 (입력 후 5초)'
+                  : '대상 아님'}
+              </span>
             </span>
             <span>
               자동동기화(S3):{' '}
@@ -809,6 +1366,19 @@ export default function App() {
         target={deleteTarget}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
+        isProcessing={isDeletingFolder && deleteTarget?.node?.type === 'folder'}
+      />
+
+      {/* Move File Modal */}
+      <MoveFileModal
+        isOpen={isMoveModalOpen}
+        storageType={currentFile?.type}
+        s3Tree={s3Tree}
+        localTree={localTree}
+        localRootHandle={localRootHandle}
+        currentFile={currentFile}
+        onClose={() => setIsMoveModalOpen(false)}
+        onConfirm={handleConfirmMove}
       />
 
     </div>

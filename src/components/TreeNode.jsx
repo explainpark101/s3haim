@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   IconChevronDown,
   IconChevronRight,
   IconFile,
-  IconFilePlus,
+  IconFileCode,
+  IconFileJson,
+  IconImage,
+  IconVideo,
   IconFolder,
-  IconFolderPlus,
   IconTrash,
 } from '@/components/icons';
 import { PencilIcon } from 'lucide-react';
@@ -20,6 +22,11 @@ export default function TreeNode({
   currentFileId,
   storageType,
   onRename,
+  deletingFolderPath,
+  isDeletingFolder,
+  isSearching = false,
+  onFolderFocus,
+  focusedFolderPath,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -37,24 +44,112 @@ export default function TreeNode({
     ? node.name.slice(node.name.lastIndexOf('.'))
     : '';
 
+  const titleContainerRef = useRef(null);
+  const scrollTimerRef = useRef(null);
+  const scrollDirectionRef = useRef(1);
+
+  const isUnderDeletingFolder =
+    deletingFolderPath && node.path.startsWith(deletingFolderPath);
+  const isDeletingThisFolder =
+    isDeletingFolder && node.type === 'folder' && deletingFolderPath === node.path;
+  const isFocusedFolder =
+    node.type === 'folder' && focusedFolderPath && node.path === focusedFolderPath;
+
+  const getFileIcon = () => {
+    if (node.type !== 'file') return IconFile;
+    const lower = node.name.toLowerCase();
+    const lastDot = lower.lastIndexOf('.');
+    const ext = lastDot > -1 ? lower.slice(lastDot + 1) : '';
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'];
+    const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'mkv'];
+
+    if (imageExts.includes(ext)) return IconImage;
+    if (videoExts.includes(ext)) return IconVideo;
+    if (ext === 'pdf') return IconFileJson;
+    if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return IconFileCode;
+    return IconFile;
+  };
+
+  const FileIconComponent = getFileIcon();
+
+  useEffect(() => {
+    if (node.type !== 'folder') return;
+    if (isSearching) {
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+  }, [isSearching, node.type]);
+
+  const startTitleScroll = () => {
+    const el = titleContainerRef.current;
+    if (!el) return;
+    if (el.scrollWidth <= el.clientWidth) return;
+
+    if (scrollTimerRef.current) {
+      window.clearInterval(scrollTimerRef.current);
+    }
+
+    scrollDirectionRef.current = 1;
+    scrollTimerRef.current = window.setInterval(() => {
+      const target = titleContainerRef.current;
+      if (!target) return;
+
+      const dir = scrollDirectionRef.current;
+      if (dir > 0) {
+        if (target.scrollLeft + target.clientWidth >= target.scrollWidth) {
+          scrollDirectionRef.current = -1;
+        } else {
+          target.scrollLeft += 1;
+        }
+      } else {
+        if (target.scrollLeft <= 0) {
+          scrollDirectionRef.current = 1;
+        } else {
+          target.scrollLeft -= 1;
+        }
+      }
+    }, 30);
+  };
+
+  const stopTitleScroll = () => {
+    if (scrollTimerRef.current) {
+      window.clearInterval(scrollTimerRef.current);
+      scrollTimerRef.current = null;
+    }
+    if (titleContainerRef.current) {
+      titleContainerRef.current.scrollLeft = 0;
+    }
+  };
+
   const handleToggle = (e) => {
     e.stopPropagation();
+    if (isUnderDeletingFolder) {
+      return;
+    }
     if (node.type === 'folder') {
       setIsOpen((prev) => !prev);
+      if (onFolderFocus) {
+        onFolderFocus(node);
+      }
     } else {
+      if (onFolderFocus && !node.path.includes('/')) {
+        onFolderFocus(null);
+      }
       onSelect(storageType, node);
     }
   };
 
   const handleRenameStart = (e) => {
     e.stopPropagation();
+    if (isUnderDeletingFolder) return;
     if (node.type !== 'file') return;
     setTempName(baseName);
     setIsRenaming(true);
   };
 
   const commitRename = () => {
-    if (node.type !== 'file') {
+    if (node.type !== 'file' || isUnderDeletingFolder) {
       setIsRenaming(false);
       return;
     }
@@ -102,10 +197,15 @@ export default function TreeNode({
   return (
     <div>
       <div
-        className={`group flex items-center justify-between py-1.5 pr-2 cursor-pointer transition-colors ${
+        data-tree-node-row
+        className={`group flex items-center justify-between py-1.5 pr-2 transition-colors ${
           isSelected
             ? 'bg-blue-50 text-blue-700 dark:bg-odp-line dark:text-odp-fgStrong'
-            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-odp-bgSoft'
+            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-odp-focusBg'
+        } ${isUnderDeletingFolder ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'} ${
+          isFocusedFolder
+            ? 'ring-2 ring-blue-400 dark:ring-blue-500 ring-offset-1 ring-offset-white dark:ring-offset-odp-bgSofter'
+            : ''
         }`}
         style={{ paddingLeft }}
         onClick={handleToggle}
@@ -115,7 +215,11 @@ export default function TreeNode({
             {node.type === 'folder' ? (isOpen ? <IconChevronDown /> : <IconChevronRight />) : null}
           </span>
           <span className="text-gray-500 dark:text-gray-300 shrink-0">
-            {node.type === 'folder' ? (isTrashRoot ? <IconTrash /> : <IconFolder />) : <IconFile />}
+            {node.type === 'folder'
+              ? isTrashRoot
+                ? <IconTrash />
+                : <IconFolder />
+              : <FileIconComponent />}
           </span>
           {isRenaming && node.type === 'file' && !isTrashRoot ? (
             <span className="flex items-baseline gap-1 min-w-0">
@@ -137,40 +241,20 @@ export default function TreeNode({
             </span>
           ) : (
             <span
-              className={`text-sm truncate select-none ${
+              ref={titleContainerRef}
+              className={`text-sm select-none overflow-hidden whitespace-nowrap ${
                 isTrashRoot ? 'font-semibold text-red-600 dark:text-red-400' : ''
               }`}
+              title={displayName}
+              onMouseEnter={startTitleScroll}
+              onMouseLeave={stopTitleScroll}
             >
               {displayName}
             </span>
           )}
         </div>
 
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 transition-opacity">
-          {node.type === 'folder' && (
-            <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCreateFile(node.path, node.handle);
-                }}
-                className="p-1 hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
-                title="파일 생성"
-              >
-                <IconFilePlus />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCreateFolder(node.path, node.handle);
-                }}
-                className="p-1 hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
-                title="폴더 생성"
-              >
-                <IconFolderPlus />
-              </button>
-            </>
-          )}
+        <div className="opacity-100 flex items-center gap-1 shrink-0 transition-opacity">
           {node.type === 'file' && !isTrashRoot && (
             <button
               onClick={handleRenameStart}
@@ -183,9 +267,15 @@ export default function TreeNode({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (isUnderDeletingFolder) return;
               onDelete(node, storageType);
             }}
-            className="p-1 hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded text-gray-500 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400"
+            disabled={isDeletingThisFolder}
+            className={`p-1 rounded text-gray-500 dark:text-gray-300 ${
+              isDeletingThisFolder
+                ? 'opacity-60 cursor-wait'
+                : 'hover:bg-gray-200 dark:hover:bg-odp-focusBg hover:text-red-600 dark:hover:text-red-400'
+            }`}
             title="삭제"
           >
             <IconTrash />
@@ -206,6 +296,12 @@ export default function TreeNode({
             onDelete={onDelete}
             currentFileId={currentFileId}
             storageType={storageType}
+            onRename={onRename}
+            deletingFolderPath={deletingFolderPath}
+            isDeletingFolder={isDeletingFolder}
+            isSearching={isSearching}
+            onFolderFocus={onFolderFocus}
+            focusedFolderPath={focusedFolderPath}
           />
         ))}
     </div>

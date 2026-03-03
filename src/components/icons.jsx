@@ -17,6 +17,11 @@ import {
   Key,
   Sun,
   Moon,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  FileCode,
+  FileJson,
+  RotateCw,
 } from 'lucide-react';
 
 export const IconFolder = ({ size = 16, ...props }) => <Folder size={size} {...props} />;
@@ -36,4 +41,8 @@ export const IconUpload = ({ size = 14, ...props }) => <Upload size={size} {...p
 export const IconKey = ({ size = 16, ...props }) => <Key size={size} {...props} />;
 export const IconSun = ({ size = 16, ...props }) => <Sun size={size} {...props} />;
 export const IconMoon = ({ size = 16, ...props }) => <Moon size={size} {...props} />;
-
+export const IconImage = ({ size = 14, ...props }) => <ImageIcon size={size} {...props} />;
+export const IconVideo = ({ size = 14, ...props }) => <VideoIcon size={size} {...props} />;
+export const IconFileCode = ({ size = 14, ...props }) => <FileCode size={size} {...props} />;
+export const IconFileJson = ({ size = 14, ...props }) => <FileJson size={size} {...props} />;
+export const IconRefresh = ({ size = 14, ...props }) => <RotateCw size={size} {...props} />;

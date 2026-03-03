@@ -8,10 +8,12 @@ export default function SettingsPage({
   onExportCreds,
   onImportClick,
   onOpenSetPasswordModal,
+  showHiddenFolders,
+  onToggleHiddenFolders,
   onClose,
 }) {
   return (
-    <div className="flex-1 flex flex-col bg-white dark:bg-odp-bgSofter min-w-0">
+    <div className="flex-1 flex flex-col bg-white dark:bg-odp-bgSofter min-w-0 max-h-full">
       <div className="px-6 py-4 border-b border-gray-100 dark:border-odp-surface flex justify-between items-center bg-gray-50 dark:bg-odp-surface shrink-0">
         <h2 className="font-bold text-gray-700 dark:text-odp-fgStrong flex items-center gap-2">
           <IconSettings /> 설정 및 암호화
@@ -132,6 +134,20 @@ export default function SettingsPage({
               <IconUpload /> 불러오기
             </button>
           </div>
+        </div>
+
+        {/* Hidden Folders Option */}
+        <div className="bg-gray-50 dark:bg-odp-surface p-4 rounded-lg border border-gray-200 dark:border-odp-borderStrong">
+          <h3 className="text-sm font-bold text-gray-700 dark:text-odp-fgStrong mb-2">표시 옵션</h3>
+          <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-odp-fg">
+            <input
+              type="checkbox"
+              checked={showHiddenFolders}
+              onChange={onToggleHiddenFolders}
+              className="w-3 h-3 accent-blue-500"
+            />
+            <span>숨김 폴더 보기 (이름이 `.` 으로 시작하는 폴더)</span>
+          </label>
         </div>
       </div>
 
