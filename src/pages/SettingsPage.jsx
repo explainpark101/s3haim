@@ -1,17 +1,22 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
 import { IconDownload, IconSettings, IconUpload } from '@/components/icons';
 
 export default function SettingsPage({
   s3Creds,
   masterPassword,
-  onChangeCreds,
+  onSaveS3Creds,
   onExportCreds,
   onImportClick,
-  onOpenSetPasswordModal,
   showHiddenFolders,
   onToggleHiddenFolders,
   onClose,
 }) {
+  const [formCreds, setFormCreds] = useState(s3Creds);
+
+  useEffect(() => {
+    setFormCreds(s3Creds);
+  }, [s3Creds]);
+
   return (
     <div className="flex-1 flex flex-col bg-white dark:bg-odp-bgSofter min-w-0 max-h-full">
       <div className="px-6 py-4 border-b border-gray-100 dark:border-odp-surface flex justify-between items-center bg-gray-50 dark:bg-odp-surface shrink-0">
@@ -32,7 +37,7 @@ export default function SettingsPage({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            onOpenSetPasswordModal();
+            onSaveS3Creds(formCreds);
           }}
           className="space-y-4"
         >
@@ -47,8 +52,8 @@ export default function SettingsPage({
                   type="text"
                   required
                   className="w-full border rounded px-3 py-2 text-sm"
-                  value={s3Creds.accessKeyId}
-                  onChange={(e) => onChangeCreds('accessKeyId', e.target.value)}
+                  value={formCreds.accessKeyId}
+                  onChange={(e) => setFormCreds((p) => ({ ...p, accessKeyId: e.target.value }))}
                 />
               </div>
               <div>
@@ -59,8 +64,8 @@ export default function SettingsPage({
                   type="password"
                   required
                   className="w-full border rounded px-3 py-2 text-sm"
-                  value={s3Creds.secretAccessKey}
-                  onChange={(e) => onChangeCreds('secretAccessKey', e.target.value)}
+                  value={formCreds.secretAccessKey}
+                  onChange={(e) => setFormCreds((p) => ({ ...p, secretAccessKey: e.target.value }))}
                 />
               </div>
               <div>
@@ -69,8 +74,8 @@ export default function SettingsPage({
                   type="text"
                   required
                   className="w-full border rounded px-3 py-2 text-sm"
-                  value={s3Creds.region}
-                  onChange={(e) => onChangeCreds('region', e.target.value)}
+                  value={formCreds.region}
+                  onChange={(e) => setFormCreds((p) => ({ ...p, region: e.target.value }))}
                 />
               </div>
               <div>
@@ -81,8 +86,8 @@ export default function SettingsPage({
                   type="text"
                   required
                   className="w-full border rounded px-3 py-2 text-sm"
-                  value={s3Creds.bucket}
-                  onChange={(e) => onChangeCreds('bucket', e.target.value)}
+                  value={formCreds.bucket}
+                  onChange={(e) => setFormCreds((p) => ({ ...p, bucket: e.target.value }))}
                 />
               </div>
               <div>
@@ -93,8 +98,8 @@ export default function SettingsPage({
                   type="text"
                   placeholder="https://..."
                   className="w-full border rounded px-3 py-2 text-sm"
-                  value={s3Creds.endpoint || ''}
-                  onChange={(e) => onChangeCreds('endpoint', e.target.value)}
+                  value={formCreds.endpoint || ''}
+                  onChange={(e) => setFormCreds((p) => ({ ...p, endpoint: e.target.value }))}
                 />
               </div>
             </div>

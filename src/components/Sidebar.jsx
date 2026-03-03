@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import TreeNode from '@/components/TreeNode';
 import {
   IconCloud,
@@ -71,8 +71,8 @@ export default function Sidebar({
     [localTree, searchTerm],
   );
   return (
-    <div className="w-full h-full bg-white dark:bg-odp-bgSoft border-r border-gray-200 dark:border-odp-bgSofter flex flex-col">
-      <div className="p-4 border-b border-gray-200 dark:border-odp-bgSofter flex flex-col gap-3 bg-gray-50 dark:bg-odp-surface">
+    <div className="w-full h-full min-h-0 bg-white dark:bg-odp-bgSoft border-r border-gray-200 dark:border-odp-bgSofter flex flex-col">
+      <div className="p-4 border-b border-gray-200 dark:border-odp-bgSofter flex flex-col gap-3 bg-gray-50 dark:bg-odp-surface shrink-0">
         <div className="flex justify-between items-center">
           <h1 className="font-bold text-lg text-gray-700 dark:text-odp-fgStrong">S3 Haim</h1>
           <div className="flex items-center gap-1.5">
@@ -103,7 +103,7 @@ export default function Sidebar({
       </div>
 
       <div
-        className="flex-1 overflow-y-auto pb-4 space-y-6"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-4 space-y-6"
         onClick={(e) => {
           if (
             !e.target.closest('[data-tree-node-row]') &&

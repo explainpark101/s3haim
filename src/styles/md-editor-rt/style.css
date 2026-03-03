@@ -1,5 +1,19 @@
 @reference "tailwindcss";
-
+/* @import "../../../tailwind.config.cjs"; */
+:root {
+  --md-scrollbar-bg-color: var(--color-gray-50);
+  --md-scrollbar-thumb-color: var(--color-gray-500);
+  --md-scrollbar-thumb-hover-color: var(--color-gray-600);
+  --md-scrollbar-thumb-active-color: var(--color-gray-600);
+  --md-border-color: var(--color-gray-200);
+}
+[data-theme="dark"] {
+  --md-scrollbar-bg-color: var(--color-gray-100);
+  --md-scrollbar-thumb-color: var(--color-gray-300);
+  --md-scrollbar-thumb-hover-color: var(--color-gray-400);
+  --md-scrollbar-thumb-active-color: var(--color-gray-500);
+  --md-border-color: var(--color-slate-200);
+}
 .md-editor .md-editor-preview {
   --md-theme-color: var(--md-color);
   --md-theme-color-reverse: var(--color-slate-200);
@@ -789,14 +803,43 @@
   content: attr(href)
 }
 
-.md-editor-preview ol,
+.md-editor-preview ol {
+  list-style-type: decimal;
+  padding-inline-start: 2em;
+  margin-block: 1em 0;
+}
+
 .md-editor-preview ul {
-  padding-inline-start: 2em
+  list-style-type: disc;
+  padding-inline-start: 2em;
+  margin-block: 1em 0;
+}
+
+.md-editor-preview li {
+  margin-block: 0.5em;
+  display: list-item;
+}
+
+.md-editor-preview ul ul,
+.md-editor-preview ol ul {
+  list-style-type: circle;
+  margin-block: 0;
+}
+
+.md-editor-preview ul ul ul,
+.md-editor-preview ol ul ul {
+  list-style-type: square;
+}
+
+.md-editor-preview ol ol,
+.md-editor-preview ul ol {
+  list-style-type: lower-roman;
+  margin-block: 0;
 }
 
 .md-editor-preview ol .task-list-item,
 .md-editor-preview ul .task-list-item {
-  list-style-type: none
+  list-style-type: none;
 }
 
 .md-editor-preview ol .task-list-item input,
@@ -2539,14 +2582,15 @@ div.smart-blue-theme hr {
 .md-editor-custom-scrollbar__thumb {
   position: absolute;
   width: 6px;
-  background: var(--md-scrollbar-thumb-color);
+  background: var(--md-scrollbar-thumb-color, var(--color-slate-400));
   border-radius: 4px;
   cursor: pointer;
   transition: background .2s
 }
 
-.md-editor-custom-scrollbar__thumb:hover {
-  background: var(--md-scrollbar-thumb-hover-color)
+.md-editor-custom-scrollbar__thumb:hover,
+.md-editor-custom-scrollbar__thumb:active {
+  background: var(--md-scrollbar-thumb-hover-color, var(--color-slate-50));
 }
 
 .md-editor-content {
@@ -2569,9 +2613,23 @@ div.smart-blue-theme hr {
   position: absolute;
   width: 2px;
   height: 100%;
-  background-color: var(--md-color);
+  background-color: var(--color-slate-300);
   z-index: 1;
-  cursor: col-resize
+  cursor: col-resize;
+  transition: background-color 0.2s;
+}
+
+.md-editor-resize-operate:hover,
+.md-editor-resize-operate:active {
+  background-color: var(--color-slate-500);
+}
+
+[data-theme="dark"] .md-editor-resize-operate {
+  background-color: var(--color-slate-500);
+}
+[data-theme="dark"] .md-editor-resize-operate:hover,
+[data-theme="dark"] .md-editor-resize-operate:active {
+  background-color: var(--color-slate-300);
 }
 
 .md-editor-input-wrapper {
@@ -3208,8 +3266,8 @@ div.smart-blue-theme hr {
   --md-bk-color: var(--color-odp-bgSoft);
   --md-bk-color-outstand: var(--color-odp-bg);
   --md-bk-hover-color: var(--color-odp-focusBg);
-  --md-border-color: var(--color-odp-border);
-  --md-border-hover-color: var(--color-odp-borderStrong);
+  --md-border-color: var(--color-odp-muted);
+  --md-border-hover-color: var(--color-odp-fg);
   --md-border-active-color: var(--color-odp-accentBlue);
   --md-modal-mask: color-mix(in srgb, var(--color-odp-bg) 45%, transparent);
   --md-modal-shadow: 0px 6px 24px 2px color-mix(in srgb, var(--color-odp-bg) 40%, transparent);
@@ -3225,12 +3283,12 @@ div.smart-blue-theme hr {
   --md-bk-color: var(--color-white);
   --md-bk-color-outstand: var(--color-slate-100);
   --md-bk-hover-color: var(--color-slate-50);
-  --md-border-color: var(--color-slate-200);
+  --md-border-color: var(--color-slate-300);
   --md-border-hover-color: var(--color-slate-400);
   --md-border-active-color: var(--color-slate-500);
   --md-modal-mask: color-mix(in srgb, var(--color-slate-900) 45%, transparent);
   --md-modal-shadow: 0px 6px 24px 2px color-mix(in srgb, var(--color-slate-900) 10%, transparent);
-  --md-scrollbar-bg-color: var(--color-slate-200);
+  --md-scrollbar-bg-color: transparent;
   --md-scrollbar-thumb-color: color-mix(in srgb, var(--color-slate-900) 30%, transparent);
   --md-scrollbar-thumb-hover-color: color-mix(in srgb, var(--color-slate-900) 35%, transparent);
   --md-scrollbar-thumb-active-color: color-mix(in srgb, var(--color-slate-900) 38%, transparent);
@@ -3304,7 +3362,7 @@ svg.md-editor-icon {
   --md-bk-color: var(--color-white);
   --md-bk-color-outstand: var(--color-slate-100);
   --md-bk-hover-color: var(--color-slate-50);
-  --md-border-color: var(--color-slate-200);
+  --md-border-color: var(--color-slate-300);
   --md-border-hover-color: var(--color-slate-400);
   --md-border-active-color: var(--color-slate-500);
   --md-modal-mask: color-mix(in srgb, var(--color-slate-900) 45%, transparent);
@@ -3350,8 +3408,8 @@ svg.md-editor-icon {
   --md-bk-color: var(--color-odp-bgSoft);
   --md-bk-color-outstand: var(--color-odp-bg);
   --md-bk-hover-color: var(--color-odp-focusBg);
-  --md-border-color: var(--color-odp-border);
-  --md-border-hover-color: var(--color-odp-borderStrong);
+  --md-border-color: var(--color-odp-muted);
+  --md-border-hover-color: var(--color-odp-fg);
   --md-border-active-color: var(--color-odp-accentBlue);
   --md-modal-mask: color-mix(in srgb, var(--color-odp-bg) 45%, transparent);
   --md-modal-shadow: 0px 6px 24px 2px color-mix(in srgb, var(--color-odp-bg) 40%, transparent);

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { MdEditor, config } from 'md-editor-rt';
 // import 'md-editor-rt/lib/style.css';
 import "@/styles/md-editor-rt/style.css";
@@ -12,15 +13,24 @@ config({
 });
 
 
-export default function MarkdownEditor({ value, onChange, theme = 'light' }) {
+export default function MarkdownEditor({ value, onChange, theme = 'light', previewOnly = false }) {
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    if (!previewOnly) return;
+    const api = editorRef.current?.value ?? editorRef.current;
+    api?.togglePreviewOnly?.(true);
+  }, [previewOnly]);
+
   return (
     <MdEditor
+      ref={editorRef}
       modelValue={value}
       onChange={onChange}
       className="h-full! max-h-dvh"
-      // previewTheme="github"
       theme={theme}
       language="ko-KR"
+      previewOnly={previewOnly}
     />
   );
 }

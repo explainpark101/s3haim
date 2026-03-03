@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, useNavigate } from 'react-router';
-import { IconFile } from '@/components/icons';
+import { IconFile, IconMenu, IconX } from '@/components/icons';
 import { encryptData, decryptData } from '@/utils/crypto';
-import { buildS3Tree } from '@/utils/s3Tree';
+import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath } from '@/utils/s3Tree';
 import Sidebar from '@/components/Sidebar';
 import EditorPane from '@/components/EditorPane';
 import { AuthModal } from '@/components/modals/AuthModal';
@@ -59,6 +59,29 @@ export default function App() {
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
   const [operationStatus, setOperationStatus] = useState('');
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const s3TreeRef = useRef([]);
+  const currentFileRef = useRef(null);
+  const hasRestoredLastFileRef = useRef(false);
+
+  useEffect(() => {
+    s3TreeRef.current = s3Tree;
+  }, [s3Tree]);
+  useEffect(() => {
+    currentFileRef.current = currentFile;
+  }, [currentFile]);
+
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 768px)');
+    const handler = () => setIsMobile(mql.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const handleSidebarResizeMouseDown = (e) => {
     e.preventDefault();
@@ -240,6 +263,66 @@ export default function App() {
     if (scriptsLoaded && isUnlocked && s3Creds.bucket) loadS3Files();
   }, [scriptsLoaded, isUnlocked, s3Creds.bucket, loadS3Files]);
 
+  // Mobile: poll S3 every 30s and refresh if S3 has newer LastModified
+  useEffect(() => {
+    if (!isMobile || !s3Creds.bucket || !isUnlocked) return;
+    const s3 = getS3Client();
+    if (!s3) return;
+
+    const poll = () => {
+      s3.listObjectsV2({ Bucket: s3Creds.bucket, Prefix: '' }, (err, data) => {
+        if (err) return;
+        const contents = (data.Contents || []).filter((item) => !!item.Key);
+        const newTree = buildS3Tree(contents);
+        const oldMap = getFileLastModifiedMap(s3TreeRef.current);
+        const newMap = getFileLastModifiedMap(newTree);
+        const changedKeys = new Set();
+        for (const [path, newDate] of newMap) {
+          const oldDate = oldMap.get(path);
+          if (!oldDate || newDate.getTime() > oldDate.getTime()) changedKeys.add(path);
+        }
+        setS3Tree(newTree);
+
+        const cur = currentFileRef.current;
+        if (cur?.type !== 's3' || !changedKeys.has(cur.id)) return;
+        const newNode = findFileNodeByPath(newTree, cur.id);
+        const newLastMod = newNode?.lastModified ? (newNode.lastModified instanceof Date ? newNode.lastModified : new Date(newNode.lastModified)) : null;
+
+        s3.getObject({ Bucket: s3Creds.bucket, Key: cur.id }, (getErr, getData) => {
+          if (getErr) return;
+          const ext = (cur.name?.split('.').pop() || '').toLowerCase();
+          if (cur.viewer === 'markdown' || ext === 'md' || ext === 'markdown' || ext === '') {
+            const text = new TextDecoder('utf-8').decode(getData.Body);
+            setCurrentFile((prev) => (prev?.id === cur.id ? { ...prev, content: text, lastModified: newLastMod } : prev));
+            setEditorContent((prevContent) => (currentFileRef.current?.id === cur.id ? text : prevContent));
+          } else if (cur.viewer === 'json' || ext === 'json') {
+            const raw = new TextDecoder('utf-8').decode(getData.Body);
+            let display = raw;
+            try {
+              const parsed = JSON.parse(raw);
+              display = JSON.stringify(parsed, null, 2);
+            } catch { /* keep raw */ }
+            setCurrentFile((prev) => (prev?.id === cur.id ? { ...prev, content: display, lastModified: newLastMod } : prev));
+            setEditorContent((prevContent) => (currentFileRef.current?.id === cur.id ? display : prevContent));
+          } else if (cur.viewer === 'image' || cur.viewer === 'pdf' || cur.viewer === 'audio' || cur.viewer === 'video') {
+            const mime = getData.ContentType || (cur.viewer === 'pdf' ? 'application/pdf' : '');
+            const blob = new Blob([getData.Body], { type: mime || undefined });
+            const url = URL.createObjectURL(blob);
+            setCurrentFile((prev) => {
+              if (prev?.id !== cur.id) return prev;
+              if (prev.objectUrl) URL.revokeObjectURL(prev.objectUrl);
+              return { ...prev, objectUrl: url, lastModified: newLastMod };
+            });
+          }
+        });
+      });
+    };
+
+    const t = setInterval(poll, 30000);
+    poll();
+    return () => clearInterval(t);
+  }, [isMobile, s3Creds.bucket, isUnlocked, getS3Client]);
+
   // 4. Local Folder Load
   const readLocalDir = async (dirHandle, basePath = '', parentHandle = null) => {
     const children = [];
@@ -274,7 +357,7 @@ export default function App() {
   };
 
   // 5. File Read & Save
-  const selectFile = async (type, node) => {
+  const selectFileRaw = async (type, node) => {
     if (node.type === 'folder') return;
     const ext = (node.name.split('.').pop() || '').toLowerCase();
 
@@ -303,6 +386,7 @@ export default function App() {
               viewer: 'image',
               objectUrl: url,
               size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              lastModified: node.lastModified,
             };
           });
           setEditorContent('');
@@ -328,6 +412,7 @@ export default function App() {
               viewer: 'pdf',
               objectUrl: url,
               size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              lastModified: node.lastModified,
             };
           });
           setEditorContent('');
@@ -347,6 +432,7 @@ export default function App() {
             content: text,
             viewer: 'markdown',
             size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            lastModified: node.lastModified,
           });
           setEditorContent(text);
           navigate(`/view/${node.path}`);
@@ -375,6 +461,7 @@ export default function App() {
             content: display,
             viewer: 'json',
             size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            lastModified: node.lastModified,
           });
           setEditorContent(display);
           navigate(`/view/${node.path}`);
@@ -404,6 +491,7 @@ export default function App() {
               viewer: 'audio',
               objectUrl: url,
               size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              lastModified: node.lastModified,
             };
           });
           setEditorContent('');
@@ -429,6 +517,7 @@ export default function App() {
               viewer: 'video',
               objectUrl: url,
               size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              lastModified: node.lastModified,
             };
           });
           setEditorContent('');
@@ -443,6 +532,7 @@ export default function App() {
         name: node.name,
         viewer: 'unsupported',
         size: null,
+        lastModified: node.lastModified,
       });
       setEditorContent('');
       navigate(`/view/${node.path}`);
@@ -463,6 +553,50 @@ export default function App() {
       navigate(`/view/${node.path}`);
     }
   };
+
+  const selectFile = useCallback(
+    (type, node) => {
+      if (isMobile) setSidebarOpen(false);
+      selectFileRaw(type, node);
+    },
+    [isMobile, selectFileRaw]
+  );
+
+  // Persist last opened file (S3 or local) for restore on next load
+  useEffect(() => {
+    if (!isUnlocked || !currentFile) return;
+    if (currentFile.type !== 's3' && currentFile.type !== 'local') return;
+    try {
+      localStorage.setItem('s3haim_lastFile', JSON.stringify({ type: currentFile.type, path: currentFile.id }));
+    } catch (_) {}
+  }, [isUnlocked, currentFile]);
+
+  // Restore last opened file once trees are loaded
+  useEffect(() => {
+    if (!isUnlocked || hasRestoredLastFileRef.current) return;
+    let saved;
+    try {
+      saved = localStorage.getItem('s3haim_lastFile');
+      if (!saved) return;
+      saved = JSON.parse(saved);
+    } catch (_) {
+      hasRestoredLastFileRef.current = true;
+      return;
+    }
+    const { type, path } = saved;
+    if (type !== 's3' && type !== 'local') {
+      hasRestoredLastFileRef.current = true;
+      return;
+    }
+    const tree = type === 's3' ? s3Tree : localTree;
+    if (!tree || tree.length === 0) {
+      if (type === 'local') hasRestoredLastFileRef.current = true;
+      return;
+    }
+    const node = findFileNodeByPath(tree, path);
+    if (node) selectFile(type, node);
+    hasRestoredLastFileRef.current = true;
+  }, [isUnlocked, s3Tree, localTree, selectFile]);
 
   const moveS3FileToFolder = async (file, destFolderPath) => {
     const s3 = getS3Client();
@@ -1165,36 +1299,81 @@ export default function App() {
           !isUnlocked ? 'blur-md pointer-events-none select-none' : ''
         }`}
       >
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 relative">
+          {/* Mobile: backdrop when sidebar open */}
+          {isMobile && sidebarOpen && (
+            <button
+              type="button"
+              aria-label="사이드바 닫기"
+              className="fixed inset-0 z-30 bg-black/30 md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+
+          {/* Sidebar: overlay from top on mobile, in-flow on desktop */}
           <div
-            className="relative h-full shrink-0"
-            style={{ width: `${sidebarWidth}px` }}
+            className={`
+              z-40 flex flex-col bg-white dark:bg-odp-bgSoft border-r border-gray-200 dark:border-odp-bgSofter
+              md:relative md:h-full md:shrink-0
+              fixed top-0 left-0 right-0 w-full h-dvh md:max-h-none
+              transition-transform duration-300 ease-out md:transition-none
+              ${isMobile && !sidebarOpen ? '-translate-y-full' : 'translate-y-0'}
+            `}
+            style={isMobile ? undefined : { width: `${sidebarWidth}px` }}
           >
-            <Sidebar
-              s3Tree={s3Tree}
-              s3Bucket={s3Creds.bucket}
-              localTree={localTree}
-              localRootHandle={localRootHandle}
-              currentFile={currentFile}
-              onSelectFile={selectFile}
-              onCreateItem={createItem}
-              onOpenLocalFolder={openLocalFolder}
-              onSetDeleteTarget={setDeleteTarget}
-              onOpenSettings={() => navigate('/settings')}
-              theme={theme}
-              onToggleTheme={() =>
-                setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
-              }
-              onRenameItem={renameTreeItem}
-              showHiddenFolders={showHiddenFolders}
-              deletingFolderPath={deletingFolderPath}
-              isDeletingFolder={isDeletingFolder}
-            />
-            <div
-              className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-blue-400/30 dark:hover:bg-blue-400/30"
-              onMouseDown={handleSidebarResizeMouseDown}
-            />
+            {isMobile && (
+              <div className="flex justify-end p-2 border-b border-gray-200 dark:border-odp-bgSofter shrink-0 md:hidden">
+                <button
+                  type="button"
+                  aria-label="사이드바 닫기"
+                  onClick={() => setSidebarOpen(false)}
+                  className="p-2 text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded transition"
+                >
+                  <IconX size={22} />
+                </button>
+              </div>
+            )}
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              <Sidebar
+                s3Tree={s3Tree}
+                s3Bucket={s3Creds.bucket}
+                localTree={localTree}
+                localRootHandle={localRootHandle}
+                currentFile={currentFile}
+                onSelectFile={selectFile}
+                onCreateItem={createItem}
+                onOpenLocalFolder={openLocalFolder}
+                onSetDeleteTarget={setDeleteTarget}
+                onOpenSettings={() => navigate('/settings')}
+                theme={theme}
+                onToggleTheme={() =>
+                  setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+                }
+                onRenameItem={renameTreeItem}
+                showHiddenFolders={showHiddenFolders}
+                deletingFolderPath={deletingFolderPath}
+                isDeletingFolder={isDeletingFolder}
+              />
+            </div>
+            {!isMobile && (
+              <div
+                className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-blue-400/30 dark:hover:bg-blue-400/30"
+                onMouseDown={handleSidebarResizeMouseDown}
+              />
+            )}
           </div>
+
+          {/* Mobile: menu button to open sidebar (only when closed) */}
+          {isMobile && !sidebarOpen && (
+            <button
+              type="button"
+              aria-label="사이드바 열기"
+              onClick={() => setSidebarOpen(true)}
+              className="fixed top-3 left-3 z-50 p-2 rounded-lg bg-white dark:bg-odp-bgSoft border border-gray-200 dark:border-odp-borderSoft text-gray-600 dark:text-odp-fg shadow-md hover:bg-gray-50 dark:hover:bg-odp-focusBg transition md:hidden"
+            >
+              <IconMenu size={22} />
+            </button>
+          )}
 
           {/* Main Content Routes */}
           <div className="flex-1 min-w-0 flex flex-col">
@@ -1205,15 +1384,12 @@ export default function App() {
                 <SettingsPage
                   s3Creds={s3Creds}
                   masterPassword={masterPassword}
-                  onChangeCreds={(field, value) =>
-                    setS3Creds((prev) => ({
-                      ...prev,
-                      [field]: value,
-                    }))
-                  }
+                  onSaveS3Creds={(creds) => {
+                    setS3Creds(creds);
+                    setShowSetPasswordModal(true);
+                  }}
                   onExportCreds={handleExportCreds}
                   onImportClick={() => fileInputRef.current?.click()}
-                  onOpenSetPasswordModal={() => setShowSetPasswordModal(true)}
                   showHiddenFolders={showHiddenFolders}
                   onToggleHiddenFolders={() =>
                     setShowHiddenFolders((prev) => !prev)
@@ -1237,6 +1413,7 @@ export default function App() {
                   onViewUnsupportedAsText={handleViewUnsupportedAsText}
                   onDownloadCurrentFile={handleDownloadCurrentFile}
                   theme={theme}
+                  previewOnly={isMobile}
                   onRequestDelete={() =>
                     setDeleteTarget({
                       node: {
@@ -1267,6 +1444,7 @@ export default function App() {
                   onViewUnsupportedAsText={handleViewUnsupportedAsText}
                   onDownloadCurrentFile={handleDownloadCurrentFile}
                   theme={theme}
+                  previewOnly={isMobile}
                   onRequestDelete={() =>
                     setDeleteTarget(
                       currentFile
@@ -1291,45 +1469,42 @@ export default function App() {
         </div>
 
         {/* Status Bar */}
-        <div className="h-7 border-t border-gray-200 dark:border-odp-borderSoft bg-white/90 dark:bg-odp-bgSoft/95 text-[11px] px-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="truncate">
-              저장소:{' '}
-              {currentFile?.type === 's3'
-                ? `S3 (${s3Creds.bucket || '-'})`
-                : currentFile?.type === 'local'
-                ? '로컬'
-                : '없음'}
+        <div className="h-6 md:h-7 border-t border-gray-200 dark:border-odp-borderSoft bg-white/90 dark:bg-odp-bgSoft/95 text-[10px] md:text-[11px] px-2 md:px-3 flex items-center justify-between gap-2 md:gap-3 shrink-0">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1 overflow-hidden">
+            <span className="truncate shrink-0 max-w-12 md:max-w-none" title={currentFile?.type === 's3' ? `S3 (${s3Creds.bucket || '-'})` : currentFile?.type === 'local' ? '로컬' : '없음'}>
+              <span className="md:hidden">{currentFile?.type === 's3' ? 'S3' : currentFile?.type === 'local' ? '로컬' : '없음'}</span>
+              <span className="hidden md:inline">저장소: {currentFile?.type === 's3' ? `S3 (${s3Creds.bucket || '-'})` : currentFile?.type === 'local' ? '로컬' : '없음'}</span>
             </span>
             {currentFile && (
               <>
-                <span className="truncate">
-                  파일:{' '}
-                  {currentFile.type === 's3'
-                    ? currentFile.id
-                    : currentFile.id || currentFile.name}
+                <span className="truncate min-w-0" title={currentFile.type === 's3' ? currentFile.id : currentFile.id || currentFile.name}>
+                  {currentFile.type === 's3' ? currentFile.id : currentFile.id || currentFile.name}
                 </span>
-                <span className="truncate text-gray-500 dark:text-odp-muted">
-                  크기:{' '}
-                  {currentFile.size != null
-                    ? formatFileSize(currentFile.size)
-                    : '알 수 없음'}
+                <span className="hidden md:inline truncate text-gray-500 dark:text-odp-muted shrink-0">
+                  크기: {currentFile.size != null ? formatFileSize(currentFile.size) : '알 수 없음'}
                 </span>
               </>
             )}
             {operationStatus && (
-              <span className="truncate text-xs text-gray-500 dark:text-odp-muted">
+              <span className="truncate text-gray-500 dark:text-odp-muted hidden md:inline">
                 상태: {operationStatus}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <span className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2 md:gap-4 shrink-0">
+            <span className="flex items-center gap-1 md:gap-1.5" title={currentFile?.type === 's3' ? (lastAutoSaveAt ? `저장 ${formatTime(lastAutoSaveAt)}` : '대기 중') : '대상 아님'}>
               <span
-                className={`w-2.5 h-2.5 rounded-full ${autoSaveIndicatorClass}`}
+                className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full shrink-0 ${autoSaveIndicatorClass}`}
                 aria-hidden="true"
               />
-              <span>
+              <span className="md:hidden">
+                {currentFile?.type === 's3'
+                  ? lastAutoSaveAt
+                    ? formatTime(lastAutoSaveAt)
+                    : '대기'
+                  : '-'}
+              </span>
+              <span className="hidden md:inline">
                 자동저장(S3):{' '}
                 {currentFile?.type === 's3'
                   ? lastAutoSaveAt
@@ -1338,7 +1513,7 @@ export default function App() {
                   : '대상 아님'}
               </span>
             </span>
-            <span>
+            <span className="hidden md:inline" title={currentFile?.type === 's3' ? (lastAutoSyncAt ? `동기화 ${formatTime(lastAutoSyncAt)}` : '대기 중') : '대상 아님'}>
               자동동기화(S3):{' '}
               {currentFile?.type === 's3'
                 ? lastAutoSyncAt

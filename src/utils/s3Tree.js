@@ -17,6 +17,10 @@ export const buildS3Tree = (contents) => {
           path: parts.slice(0, i + 1).join('/') + (isFolder ? '/' : ''),
           children: isFolder ? [] : undefined,
           key: item.Key,
+          ...(isFolder ? {} : {
+            lastModified: item.LastModified,
+            size: item.Size,
+          }),
         };
         current.children.push(child);
       }
@@ -41,5 +45,44 @@ export const buildS3Tree = (contents) => {
   sortChildren(root.children);
 
   return root.children;
+};
+
+/**
+ * Collect path -> lastModified for all file nodes in the tree.
+ * @param {Array} nodes - Tree nodes (from buildS3Tree)
+ * @returns {Map<string, Date>}
+ */
+export const getFileLastModifiedMap = (nodes) => {
+  const map = new Map();
+  const walk = (list) => {
+    if (!list) return;
+    for (const node of list) {
+      if (node.type === 'file' && node.path != null && node.lastModified != null) {
+        map.set(node.path, node.lastModified instanceof Date ? node.lastModified : new Date(node.lastModified));
+      }
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return map;
+};
+
+/**
+ * Find a file node by path in the tree.
+ * @param {Array} nodes
+ * @param {string} path
+ * @returns {{ lastModified?: Date, size?: number } | null}
+ */
+export const findFileNodeByPath = (nodes, path) => {
+  const walk = (list) => {
+    if (!list) return null;
+    for (const node of list) {
+      if (node.type === 'file' && node.path === path) return node;
+      const found = node.children ? walk(node.children) : null;
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(nodes);
 };
 

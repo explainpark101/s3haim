@@ -179,7 +179,7 @@ const resolvedTheme = theme ?? systemTheme;
 `MemoEditor`와 동일한 패턴으로, **ko_KR + 커스텀 스타일**을 사용하는 최소 예제:
 
 ```tsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { MdEditor, config } from 'md-editor-rt';
 import KO_KR from '@vavt/cm-extension/dist/locale/ko-KR';
 // import 'md-editor-rt/lib/style.css';
@@ -235,7 +235,7 @@ export function MemoEditorExample({ value, onChange, editorId }: {
 `MemoViewer`와 동일한 방식으로, **프리뷰 전용 ko_KR + 커스텀 스타일**:
 
 ```tsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { MdPreview, config } from 'md-editor-rt';
 import KO_KR from '@vavt/cm-extension/dist/locale/ko-KR';
 // import 'md-editor-rt/lib/preview.css';

@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   Folder,
   Cloud,
@@ -23,6 +22,8 @@ import {
   FileJson,
   RotateCw,
   Music2,
+  Menu,
+  X,
 } from 'lucide-react';
 
 export const IconFolder = ({ size = 16, ...props }) => <Folder size={size} {...props} />;
@@ -48,3 +49,5 @@ export const IconFileCode = ({ size = 14, ...props }) => <FileCode size={size} {
 export const IconFileJson = ({ size = 14, ...props }) => <FileJson size={size} {...props} />;
 export const IconRefresh = ({ size = 14, ...props }) => <RotateCw size={size} {...props} />;
 export const IconMusic = ({ size = 14, ...props }) => <Music2 size={size} {...props} />;
+export const IconMenu = ({ size = 20, ...props }) => <Menu size={size} {...props} />;
+export const IconX = ({ size = 20, ...props }) => <X size={size} {...props} />;

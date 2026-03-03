@@ -1,4 +1,3 @@
-import React from 'react';
 import { IconDownload, IconSettings, IconUpload } from '@/components/icons';
 import Modal from '@/components/modals/Modal';
 

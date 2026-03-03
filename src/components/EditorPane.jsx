@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   IconCloud,
   IconDownload,
@@ -25,6 +25,7 @@ export default function EditorPane({
   onViewUnsupportedAsText,
   onDownloadCurrentFile,
   theme = 'light',
+  previewOnly = false,
 }) {
   const [title, setTitle] = useState('');
   const [isExtConfirmOpen, setIsExtConfirmOpen] = useState(false);
@@ -196,7 +197,8 @@ export default function EditorPane({
               onClick={handlePdfRefresh}
               title="PDF 뷰어 새로고침"
             >
-              <IconRefresh size={14} /> 새로고침
+              <IconRefresh size={14} />
+              <span className="hidden md:inline"> 새로고침</span>
             </Button>
           )}
           <Button
@@ -204,16 +206,20 @@ export default function EditorPane({
             variant="secondary"
             size="sm"
             onClick={onRequestMove}
+            title="폴더로 이동"
           >
-            <IconFolder size={14} /> 폴더로 이동
+            <IconFolder size={14} />
+            <span className="hidden md:inline"> 폴더로 이동</span>
           </Button>
           <Button
             type="button"
             variant="danger"
             size="sm"
             onClick={onRequestDelete}
+            title="삭제"
           >
-            <IconTrash size={16} /> 삭제
+            <IconTrash size={16} />
+            <span className="hidden md:inline"> 삭제</span>
           </Button>
           <Button
             type="button"
@@ -221,14 +227,16 @@ export default function EditorPane({
             size="sm"
             onClick={onSave}
             disabled={isSaving || viewer !== 'markdown'}
+            title={isSaving ? '저장 중...' : '저장'}
           >
-            <IconSave /> {isSaving ? '저장 중...' : '저장'}
+            <IconSave />
+            <span className="hidden md:inline"> {isSaving ? '저장 중...' : '저장'}</span>
           </Button>
         </div>
       </div>
       <div className="flex-1 flex overflow-hidden bg-white dark:bg-odp-surface h-full">
         {viewer === 'markdown' ? (
-          <MarkdownEditor value={editorContent} onChange={onChangeEditor} theme={theme} />
+          <MarkdownEditor value={editorContent} onChange={onChangeEditor} theme={theme} previewOnly={previewOnly} />
         ) : viewer === 'image' && currentFile.objectUrl ? (
           <div className="flex-1 flex items-center justify-center overflow-auto p-4">
             <img

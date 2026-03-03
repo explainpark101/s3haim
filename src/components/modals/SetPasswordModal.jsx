@@ -1,4 +1,3 @@
-import React from 'react';
 import { IconKey } from '@/components/icons';
 import Modal from '@/components/modals/Modal';
 
