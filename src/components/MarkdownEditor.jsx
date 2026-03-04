@@ -13,8 +13,9 @@ config({
 });
 
 
-export default function MarkdownEditor({ value, onChange, theme = 'light', previewOnly = false }) {
+export default function MarkdownEditor({ value, onChange, onSave, theme = 'light', previewOnly = false }) {
   const editorRef = useRef(null);
+  const containerRef = useRef(null);
 
   useEffect(() => {
     if (!previewOnly) return;
@@ -22,16 +23,31 @@ export default function MarkdownEditor({ value, onChange, theme = 'light', previ
     api?.togglePreviewOnly?.(true);
   }, [previewOnly]);
 
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof onSave !== 'function') return;
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        onSave();
+      }
+    };
+    el.addEventListener('keydown', handleKeyDown, true);
+    return () => el.removeEventListener('keydown', handleKeyDown, true);
+  }, [onSave]);
+
   return (
-    <MdEditor
-      ref={editorRef}
-      modelValue={value}
-      onChange={onChange}
-      className="h-full! max-h-dvh"
-      theme={theme}
-      language="ko-KR"
-      previewOnly={previewOnly}
-    />
+    <div ref={containerRef} className="h-full flex flex-col">
+      <MdEditor
+        ref={editorRef}
+        modelValue={value}
+        onChange={onChange}
+        className="h-full! max-h-dvh"
+        theme={theme}
+        language="ko-KR"
+        previewOnly={previewOnly}
+      />
+    </div>
   );
 }
 

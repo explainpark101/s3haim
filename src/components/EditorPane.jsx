@@ -236,7 +236,13 @@ export default function EditorPane({
       </div>
       <div className="flex-1 flex overflow-hidden bg-white dark:bg-odp-surface h-full">
         {viewer === 'markdown' ? (
-          <MarkdownEditor value={editorContent} onChange={onChangeEditor} theme={theme} previewOnly={previewOnly} />
+          <MarkdownEditor
+            value={editorContent}
+            onChange={onChangeEditor}
+            onSave={onSave}
+            theme={theme}
+            previewOnly={previewOnly}
+          />
         ) : viewer === 'image' && currentFile.objectUrl ? (
           <div className="flex-1 flex items-center justify-center overflow-auto p-4">
             <img
