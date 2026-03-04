@@ -128,20 +128,20 @@ export default function Sidebar({
                   const targetPath = lastFocusedS3FolderPath || '';
                   onCreateItem('s3', targetPath, null, 'file');
                 }}
-                className="hover:text-blue-500"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
                 title="선택된 폴더에 파일 생성"
               >
-                <IconFilePlus />
+                <IconFilePlus size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
               </button>
               <button
                 onClick={() => {
                   const targetPath = lastFocusedS3FolderPath || '';
                   onCreateItem('s3', targetPath, null, 'folder');
                 }}
-                className="hover:text-blue-500"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
                 title="선택된 폴더에 폴더 생성"
               >
-                <IconFolderPlus />
+                <IconFolderPlus size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
               </button>
             </div>
           </div>
@@ -194,10 +194,10 @@ export default function Sidebar({
                         : { path: '', handle: localRootHandle };
                     onCreateItem('local', target.path, target.handle, 'file');
                   }}
-                  className="hover:text-blue-500"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
                   title="선택된 폴더에 파일 생성"
                 >
-                  <IconFilePlus />
+                  <IconFilePlus size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
                 </button>
                 <button
                   onClick={() => {
@@ -207,10 +207,10 @@ export default function Sidebar({
                         : { path: '', handle: localRootHandle };
                     onCreateItem('local', target.path, target.handle, 'folder');
                   }}
-                  className="hover:text-blue-500"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
                   title="선택된 폴더에 폴더 생성"
                 >
-                  <IconFolderPlus />
+                  <IconFolderPlus size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
                 </button>
               </div>
             )}

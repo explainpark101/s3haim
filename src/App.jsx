@@ -3,6 +3,16 @@ import { Routes, Route, useNavigate } from 'react-router';
 import { IconFile, IconMenu, IconX } from '@/components/icons';
 import { encryptData, decryptData } from '@/utils/crypto';
 import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath } from '@/utils/s3Tree';
+import {
+  createS3Client,
+  listObjectsV2,
+  getObjectBody,
+  putObject,
+  deleteObject,
+  deleteObjects,
+  copyObject,
+  getSignedGetUrl,
+} from '@/utils/s3Client';
 import Sidebar from '@/components/Sidebar';
 import EditorPane from '@/components/EditorPane';
 import { AuthModal } from '@/components/modals/AuthModal';
@@ -10,6 +20,7 @@ import { SetPasswordModal } from '@/components/modals/SetPasswordModal';
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
 import { MoveFileModal } from '@/components/modals/MoveFileModal';
+import { CreateItemModal } from '@/components/modals/CreateItemModal';
 import SettingsPage from '@/pages/SettingsPage';
 
 export default function App() {
@@ -59,6 +70,9 @@ export default function App() {
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
   const [operationStatus, setOperationStatus] = useState('');
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createModalContext, setCreateModalContext] = useState(null);
+  const [isCreateSubmitting, setIsCreateSubmitting] = useState(false);
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
@@ -143,24 +157,10 @@ export default function App() {
     window.localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // 1. Script Load & Init Auth
+  // 1. Init (marked & S3 client are from npm modules; no script loading)
   useEffect(() => {
-    const loadScript = (src, globalVar) => new Promise((resolve, reject) => {
-      if (window[globalVar]) return resolve();
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-
-    Promise.all([
-      loadScript('https://sdk.amazonaws.com/js/aws-sdk-2.1408.0.min.js', 'AWS'),
-      loadScript('https://cdn.jsdelivr.net/npm/marked/marked.min.js', 'marked')
-    ]).then(() => {
-      setScriptsLoaded(true);
-      checkStoredCredentials();
-    }).catch(err => console.error("Script loading error:", err));
+    setScriptsLoaded(true);
+    checkStoredCredentials();
   }, []);
 
   const checkStoredCredentials = () => {
@@ -248,26 +248,18 @@ export default function App() {
     }
   };
 
-  // 3. S3 Actions
-  const getS3Client = useCallback((creds = s3Creds) => {
-    if (!window.AWS || !creds.accessKeyId || !creds.secretAccessKey) return null;
-    const s3Options = { apiVersion: '2006-03-01', accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey, region: creds.region };
-    if (creds.endpoint) {
-      s3Options.endpoint = creds.endpoint;
-      s3Options.s3ForcePathStyle = true;
-    }
-    return new window.AWS.S3(s3Options);
-  }, [s3Creds]);
+  // 3. S3 Actions (using @aws-sdk/client-s3)
+  const getS3Client = useCallback((creds = s3Creds) => createS3Client(creds), [s3Creds]);
 
-  const loadS3Files = useCallback((creds = s3Creds) => {
-    const s3 = getS3Client(creds);
-    if (!s3 || !creds.bucket) return;
-
-    s3.listObjectsV2({ Bucket: creds.bucket, Prefix: '' }, (err, data) => {
-      if (err) return console.error("S3 Load Error:", err);
-      const contents = (data.Contents || []).filter((item) => !!item.Key);
+  const loadS3Files = useCallback(async (creds = s3Creds) => {
+    const client = getS3Client(creds);
+    if (!client || !creds.bucket) return;
+    try {
+      const contents = await listObjectsV2(client, creds.bucket, '');
       setS3Tree(buildS3Tree(contents));
-    });
+    } catch (err) {
+      console.error("S3 Load Error:", err);
+    }
   }, [getS3Client, s3Creds]);
 
   useEffect(() => {
@@ -277,13 +269,12 @@ export default function App() {
   // Mobile: poll S3 every 30s and refresh if S3 has newer LastModified
   useEffect(() => {
     if (!isMobile || !s3Creds.bucket || !isUnlocked) return;
-    const s3 = getS3Client();
-    if (!s3) return;
+    const client = getS3Client();
+    if (!client) return;
 
-    const poll = () => {
-      s3.listObjectsV2({ Bucket: s3Creds.bucket, Prefix: '' }, (err, data) => {
-        if (err) return;
-        const contents = (data.Contents || []).filter((item) => !!item.Key);
+    const poll = async () => {
+      try {
+        const contents = await listObjectsV2(client, s3Creds.bucket, '');
         const newTree = buildS3Tree(contents);
         const oldMap = getFileLastModifiedMap(s3TreeRef.current);
         const newMap = getFileLastModifiedMap(newTree);
@@ -299,34 +290,34 @@ export default function App() {
         const newNode = findFileNodeByPath(newTree, cur.id);
         const newLastMod = newNode?.lastModified ? (newNode.lastModified instanceof Date ? newNode.lastModified : new Date(newNode.lastModified)) : null;
 
-        s3.getObject({ Bucket: s3Creds.bucket, Key: cur.id }, (getErr, getData) => {
-          if (getErr) return;
-          const ext = (cur.name?.split('.').pop() || '').toLowerCase();
-          if (cur.viewer === 'markdown' || ext === 'md' || ext === 'markdown' || ext === '') {
-            const text = new TextDecoder('utf-8').decode(getData.Body);
-            setCurrentFile((prev) => (prev?.id === cur.id ? { ...prev, content: text, lastModified: newLastMod } : prev));
-            setEditorContent((prevContent) => (currentFileRef.current?.id === cur.id ? text : prevContent));
-          } else if (cur.viewer === 'json' || ext === 'json') {
-            const raw = new TextDecoder('utf-8').decode(getData.Body);
-            let display = raw;
-            try {
-              const parsed = JSON.parse(raw);
-              display = JSON.stringify(parsed, null, 2);
-            } catch { /* keep raw */ }
-            setCurrentFile((prev) => (prev?.id === cur.id ? { ...prev, content: display, lastModified: newLastMod } : prev));
-            setEditorContent((prevContent) => (currentFileRef.current?.id === cur.id ? display : prevContent));
-          } else if (cur.viewer === 'image' || cur.viewer === 'pdf' || cur.viewer === 'audio' || cur.viewer === 'video') {
-            const mime = getData.ContentType || (cur.viewer === 'pdf' ? 'application/pdf' : '');
-            const blob = new Blob([getData.Body], { type: mime || undefined });
-            const url = URL.createObjectURL(blob);
-            setCurrentFile((prev) => {
-              if (prev?.id !== cur.id) return prev;
-              if (prev.objectUrl) URL.revokeObjectURL(prev.objectUrl);
-              return { ...prev, objectUrl: url, lastModified: newLastMod };
-            });
-          }
-        });
-      });
+        const { body, ContentType } = await getObjectBody(client, s3Creds.bucket, cur.id);
+        const ext = (cur.name?.split('.').pop() || '').toLowerCase();
+        if (cur.viewer === 'markdown' || ext === 'md' || ext === 'markdown' || ext === '') {
+          const text = new TextDecoder('utf-8').decode(body);
+          setCurrentFile((prev) => (prev?.id === cur.id ? { ...prev, content: text, lastModified: newLastMod } : prev));
+          setEditorContent((prevContent) => (currentFileRef.current?.id === cur.id ? text : prevContent));
+        } else if (cur.viewer === 'json' || ext === 'json') {
+          const raw = new TextDecoder('utf-8').decode(body);
+          let display = raw;
+          try {
+            const parsed = JSON.parse(raw);
+            display = JSON.stringify(parsed, null, 2);
+          } catch { /* keep raw */ }
+          setCurrentFile((prev) => (prev?.id === cur.id ? { ...prev, content: display, lastModified: newLastMod } : prev));
+          setEditorContent((prevContent) => (currentFileRef.current?.id === cur.id ? display : prevContent));
+        } else if (cur.viewer === 'image' || cur.viewer === 'pdf' || cur.viewer === 'audio' || cur.viewer === 'video') {
+          const mime = ContentType || (cur.viewer === 'pdf' ? 'application/pdf' : '');
+          const blob = new Blob([body], { type: mime || undefined });
+          const url = URL.createObjectURL(blob);
+          setCurrentFile((prev) => {
+            if (prev?.id !== cur.id) return prev;
+            if (prev.objectUrl) URL.revokeObjectURL(prev.objectUrl);
+            return { ...prev, objectUrl: url, lastModified: newLastMod };
+          });
+        }
+      } catch {
+        // ignore poll errors
+      }
     };
 
     const t = setInterval(poll, 30000);
@@ -373,19 +364,17 @@ export default function App() {
     const ext = (node.name.split('.').pop() || '').toLowerCase();
 
     if (type === 's3') {
-      const s3 = getS3Client();
-      if (!s3) return;
+      const client = getS3Client();
+      if (!client) return;
 
       const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
 
       if (imageExts.includes(ext)) {
-        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-          if (err) return console.error('S3 Read Error:', err);
-          const mime =
-            ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-          const blob = new Blob([data.Body], { type: mime });
+        try {
+          const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, node.path);
+          const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+          const blob = new Blob([body], { type: mime });
           const url = URL.createObjectURL(blob);
-
           setCurrentFile((prev) => {
             if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
               URL.revokeObjectURL(prev.objectUrl);
@@ -396,22 +385,23 @@ export default function App() {
               name: node.name,
               viewer: 'image',
               objectUrl: url,
-              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              size: typeof ContentLength === 'number' ? ContentLength : null,
               lastModified: node.lastModified,
             };
           });
           setEditorContent('');
           navigate(`/view/${node.path}`);
-        });
+        } catch (err) {
+          console.error('S3 Read Error:', err);
+        }
         return;
       }
 
       if (ext === 'pdf') {
-        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-          if (err) return console.error('S3 Read Error:', err);
-          const blob = new Blob([data.Body], { type: 'application/pdf' });
+        try {
+          const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, node.path);
+          const blob = new Blob([body], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
-
           setCurrentFile((prev) => {
             if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
               URL.revokeObjectURL(prev.objectUrl);
@@ -422,39 +412,43 @@ export default function App() {
               name: node.name,
               viewer: 'pdf',
               objectUrl: url,
-              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              size: typeof ContentLength === 'number' ? ContentLength : null,
               lastModified: node.lastModified,
             };
           });
           setEditorContent('');
           navigate(`/view/${node.path}`);
-        });
+        } catch (err) {
+          console.error('S3 Read Error:', err);
+        }
         return;
       }
 
       if (ext === 'md' || ext === 'markdown' || ext === '') {
-        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-          if (err) return console.error('S3 Read Error:', err);
-          const text = new TextDecoder('utf-8').decode(data.Body);
+        try {
+          const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, node.path);
+          const text = new TextDecoder('utf-8').decode(body);
           setCurrentFile({
             type: 's3',
             id: node.path,
             name: node.name,
             content: text,
             viewer: 'markdown',
-            size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            size: typeof ContentLength === 'number' ? ContentLength : null,
             lastModified: node.lastModified,
           });
           setEditorContent(text);
           navigate(`/view/${node.path}`);
-        });
+        } catch (err) {
+          console.error('S3 Read Error:', err);
+        }
         return;
       }
 
       if (ext === 'json') {
-        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-          if (err) return console.error('S3 Read Error:', err);
-          const raw = new TextDecoder('utf-8').decode(data.Body);
+        try {
+          const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, node.path);
+          const raw = new TextDecoder('utf-8').decode(body);
           const maxFormatLen = 100000;
           let display = raw;
           if (raw.length <= maxFormatLen) {
@@ -471,12 +465,14 @@ export default function App() {
             name: node.name,
             content: display,
             viewer: 'json',
-            size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+            size: typeof ContentLength === 'number' ? ContentLength : null,
             lastModified: node.lastModified,
           });
           setEditorContent(display);
           navigate(`/view/${node.path}`);
-        });
+        } catch (err) {
+          console.error('S3 Read Error:', err);
+        }
         return;
       }
 
@@ -486,10 +482,10 @@ export default function App() {
       const isVideo = videoExts.includes(ext);
 
       if (isAudio) {
-        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-          if (err) return console.error('S3 Read Error:', err);
+        try {
+          const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, node.path);
           const mime = ext === 'm4a' || ext === 'mp4' ? 'audio/mp4' : ext === 'mp3' ? 'audio/mpeg' : ext === 'ogg' || ext === 'ogv' ? 'audio/ogg' : ext === 'weba' ? 'audio/webm' : `audio/${ext}`;
-          const blob = new Blob([data.Body], { type: mime });
+          const blob = new Blob([body], { type: mime });
           const url = URL.createObjectURL(blob);
           setCurrentFile((prev) => {
             if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
@@ -501,21 +497,23 @@ export default function App() {
               name: node.name,
               viewer: 'audio',
               objectUrl: url,
-              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              size: typeof ContentLength === 'number' ? ContentLength : null,
               lastModified: node.lastModified,
             };
           });
           setEditorContent('');
           navigate(`/view/${node.path}`);
-        });
+        } catch (err) {
+          console.error('S3 Read Error:', err);
+        }
         return;
       }
 
       if (isVideo) {
-        s3.getObject({ Bucket: s3Creds.bucket, Key: node.path }, (err, data) => {
-          if (err) return console.error('S3 Read Error:', err);
+        try {
+          const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, node.path);
           const mime = ext === 'mp4' || ext === 'mov' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : 'video/ogg';
-          const blob = new Blob([data.Body], { type: mime });
+          const blob = new Blob([body], { type: mime });
           const url = URL.createObjectURL(blob);
           setCurrentFile((prev) => {
             if (prev && (prev.viewer === 'image' || prev.viewer === 'pdf' || prev.viewer === 'audio' || prev.viewer === 'video') && prev.objectUrl) {
@@ -527,13 +525,15 @@ export default function App() {
               name: node.name,
               viewer: 'video',
               objectUrl: url,
-              size: typeof data.ContentLength === 'number' ? data.ContentLength : null,
+              size: typeof ContentLength === 'number' ? ContentLength : null,
               lastModified: node.lastModified,
             };
           });
           setEditorContent('');
           navigate(`/view/${node.path}`);
-        });
+        } catch (err) {
+          console.error('S3 Read Error:', err);
+        }
         return;
       }
 
@@ -610,8 +610,8 @@ export default function App() {
   }, [isUnlocked, s3Tree, localTree, selectFile]);
 
   const moveS3FileToFolder = async (file, destFolderPath) => {
-    const s3 = getS3Client();
-    if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+    const client = getS3Client();
+    if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
     const bucket = s3Creds.bucket;
     const fileName = file.name;
     const destPrefix = destFolderPath || '';
@@ -619,20 +619,8 @@ export default function App() {
     const oldKey = file.id;
     if (newKey === oldKey) return file;
 
-    await s3
-      .copyObject({
-        Bucket: bucket,
-        CopySource: `${bucket}/${encodeURIComponent(oldKey)}`,
-        Key: newKey,
-      })
-      .promise();
-
-    await s3
-      .deleteObject({
-        Bucket: bucket,
-        Key: oldKey,
-      })
-      .promise();
+    await copyObject(client, bucket, oldKey, newKey);
+    await deleteObject(client, bucket, oldKey);
 
     loadS3Files();
 
@@ -672,22 +660,15 @@ export default function App() {
     if (!currentFile || currentFile.viewer !== 'unsupported') return;
     if (currentFile.type === 's3') {
       try {
-        const s3 = getS3Client();
-        if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
-        const data = await s3
-          .getObject({ Bucket: s3Creds.bucket, Key: currentFile.id })
-          .promise();
-        const raw = data.Body
-          ? new TextDecoder('utf-8').decode(
-              data.Body instanceof Uint8Array ? data.Body : new Uint8Array(data.Body),
-            )
-          : '';
-        const content = raw;
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        const { body, ContentLength } = await getObjectBody(client, s3Creds.bucket, currentFile.id);
+        const content = new TextDecoder('utf-8').decode(body);
         setCurrentFile((prev) => ({
           ...prev,
           content,
           viewer: 'raw',
-          size: typeof data.ContentLength === 'number' ? data.ContentLength : prev?.size ?? null,
+          size: typeof ContentLength === 'number' ? ContentLength : prev?.size ?? null,
         }));
         setEditorContent(content);
       } catch (e) {
@@ -701,13 +682,9 @@ export default function App() {
     if (!currentFile) return;
     if (currentFile.type === 's3') {
       try {
-        const s3 = getS3Client();
-        if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
-        const url = s3.getSignedUrl('getObject', {
-          Bucket: s3Creds.bucket,
-          Key: currentFile.id,
-          Expires: 60,
-        });
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        const url = await getSignedGetUrl(client, s3Creds.bucket, currentFile.id, 60);
         window.open(url, '_blank');
       } catch (e) {
         console.error('Signed URL 생성 실패:', e);
@@ -734,7 +711,14 @@ export default function App() {
     setIsSaving(true);
     try {
       if (currentFile.type === 's3') {
-        await getS3Client().putObject({ Bucket: s3Creds.bucket, Key: currentFile.id, Body: editorContent, ContentType: 'text/markdown' }).promise();
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        await putObject(client, {
+          Bucket: s3Creds.bucket,
+          Key: currentFile.id,
+          Body: editorContent,
+          ContentType: 'text/markdown',
+        });
         loadS3Files();
       } else if (currentFile.type === 'local') {
         const writable = await currentFile.handle.createWritable();
@@ -757,8 +741,8 @@ export default function App() {
   };
 
   const renameS3File = async (file, newName) => {
-    const s3 = getS3Client();
-    if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+    const client = getS3Client();
+    if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
 
     const oldKey = file.id;
     const lastSlash = oldKey.lastIndexOf('/');
@@ -767,20 +751,8 @@ export default function App() {
 
     if (newKey === oldKey) return file;
 
-    await s3
-      .copyObject({
-        Bucket: s3Creds.bucket,
-        CopySource: `${s3Creds.bucket}/${encodeURIComponent(oldKey)}`,
-        Key: newKey,
-      })
-      .promise();
-
-    await s3
-      .deleteObject({
-        Bucket: s3Creds.bucket,
-        Key: oldKey,
-      })
-      .promise();
+    await copyObject(client, s3Creds.bucket, oldKey, newKey);
+    await deleteObject(client, s3Creds.bucket, oldKey);
 
     loadS3Files();
 
@@ -850,30 +822,32 @@ export default function App() {
   };
 
   // 6. Create & Delete
-  const createItem = async (storageType, parentPath, parentDirHandle, type) => {
-    const name = prompt(`새 ${type === 'folder' ? '폴더' : '파일'} 이름을 입력하세요:`);
+  const createItem = async (storageType, parentPath, parentDirHandle, type, nameInput) => {
+    const name = (nameInput || '').trim();
     if (!name) return;
-    
+
     let finalName = name;
     if (type === 'file' && !finalName.endsWith('.md')) finalName += '.md';
     const newPath = parentPath + finalName + (type === 'folder' ? '/' : '');
 
     try {
       if (storageType === 's3') {
-        const s3 = getS3Client();
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
         if (type === 'folder') {
-          await s3.putObject({ Bucket: s3Creds.bucket, Key: newPath, Body: '' }).promise();
+          await putObject(client, { Bucket: s3Creds.bucket, Key: newPath, Body: '' });
           loadS3Files();
         } else {
+          await putObject(client, { Bucket: s3Creds.bucket, Key: newPath, Body: '' });
+          loadS3Files();
           setCurrentFile({ type: 's3', id: newPath, name: finalName, content: '' });
           setEditorContent('');
-          loadS3Files();
           navigate(`/view/${newPath}`);
         }
       } else if (storageType === 'local') {
         const targetDirHandle = parentDirHandle || localRootHandle;
         if (!targetDirHandle) return alert("루트 폴더를 먼저 열어주세요.");
-        
+
         if (type === 'folder') {
           await targetDirHandle.getDirectoryHandle(finalName, { create: true });
         } else {
@@ -892,6 +866,27 @@ export default function App() {
       }
     } catch (e) {
       alert("생성 실패: " + e.message);
+      throw e;
+    }
+  };
+
+  const requestCreateItem = (storageType, parentPath, parentDirHandle, type) => {
+    setCreateModalContext({ storageType, parentPath, parentDirHandle, type });
+    setCreateModalOpen(true);
+  };
+
+  const handleCreateItemSubmit = async (nameInput) => {
+    if (!createModalContext) return;
+    const { storageType, parentPath, parentDirHandle, type } = createModalContext;
+    setIsCreateSubmitting(true);
+    try {
+      await createItem(storageType, parentPath, parentDirHandle, type, nameInput);
+      setCreateModalOpen(false);
+      setCreateModalContext(null);
+    } catch (e) {
+      // createItem already shows alert
+    } finally {
+      setIsCreateSubmitting(false);
     }
   };
 
@@ -949,69 +944,28 @@ export default function App() {
   };
 
   const moveS3EntryToTrash = async (node) => {
-    const s3 = getS3Client();
-    if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+    const client = getS3Client();
+    if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
 
     const bucket = s3Creds.bucket;
 
-    const ensureS3TrashFolder = async () => {
-      await s3
-        .putObject({
-          Bucket: bucket,
-          Key: '.trash/',
-          Body: '',
-        })
-        .promise();
-    };
-
-    await ensureS3TrashFolder();
+    await putObject(client, { Bucket: bucket, Key: '.trash/', Body: '' });
 
     if (node.type === 'file') {
       const srcKey = node.path;
       const destKey = `.trash/${srcKey}`;
-
-      await s3
-        .copyObject({
-          Bucket: bucket,
-          CopySource: `${bucket}/${encodeURIComponent(srcKey)}`,
-          Key: destKey,
-        })
-        .promise();
-
-      await s3
-        .deleteObject({
-          Bucket: bucket,
-          Key: srcKey,
-        })
-        .promise();
+      await copyObject(client, bucket, srcKey, destKey);
+      await deleteObject(client, bucket, srcKey);
     } else if (node.type === 'folder') {
       const prefix = node.path;
-      const listedObjects = await s3
-        .listObjectsV2({
-          Bucket: bucket,
-          Prefix: prefix,
-        })
-        .promise();
+      const contents = await listObjectsV2(client, bucket, prefix);
 
-      if (listedObjects.Contents && listedObjects.Contents.length > 0) {
-        for (const { Key } of listedObjects.Contents) {
+      if (contents.length > 0) {
+        for (const { Key } of contents) {
           const destKey = `.trash/${Key}`;
-          await s3
-            .copyObject({
-              Bucket: bucket,
-              CopySource: `${bucket}/${encodeURIComponent(Key)}`,
-              Key: destKey,
-            })
-            .promise();
+          await copyObject(client, bucket, Key, destKey);
         }
-
-        const deleteParams = {
-          Bucket: bucket,
-          Delete: {
-            Objects: listedObjects.Contents.map(({ Key }) => ({ Key })),
-          },
-        };
-        await s3.deleteObjects(deleteParams).promise();
+        await deleteObjects(client, bucket, contents.map(({ Key }) => ({ Key })));
       }
     }
   };
@@ -1046,23 +1000,17 @@ export default function App() {
 
     try {
       if (type === 's3') {
-        const s3 = getS3Client();
-        if (!s3) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
 
         if (isInTrash) {
           if (node.type === 'folder') {
-            const listedObjects = await s3
-              .listObjectsV2({ Bucket: s3Creds.bucket, Prefix: node.path })
-              .promise();
-            if (listedObjects.Contents.length > 0) {
-              const deleteParams = {
-                Bucket: s3Creds.bucket,
-                Delete: { Objects: listedObjects.Contents.map(({ Key }) => ({ Key })) },
-              };
-              await s3.deleteObjects(deleteParams).promise();
+            const contents = await listObjectsV2(client, s3Creds.bucket, node.path);
+            if (contents.length > 0) {
+              await deleteObjects(client, s3Creds.bucket, contents.map(({ Key }) => ({ Key })));
             }
           } else {
-            await s3.deleteObject({ Bucket: s3Creds.bucket, Key: node.path }).promise();
+            await deleteObject(client, s3Creds.bucket, node.path);
           }
         } else {
           await moveS3EntryToTrash(node);
@@ -1217,33 +1165,31 @@ export default function App() {
     if (!currentFile || currentFile.type !== 's3') return;
     if (currentFile.viewer !== 'markdown') return;
 
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (!lastInputAt) return;
       const idleMs = Date.now() - lastInputAt;
       if (idleMs < 30000) return;
       // 로컬에 미저장 내용이 있으면 덮어쓰지 않음
       if (currentFile.content !== editorContent) return;
 
-      const s3 = getS3Client();
-      if (!s3) return;
+      const client = getS3Client();
+      if (!client) return;
 
-      s3.getObject({ Bucket: s3Creds.bucket, Key: currentFile.id }, (err, data) => {
-        if (err) {
-          console.error('Auto sync S3 Read Error:', err);
-          return;
-        }
-        const text = new TextDecoder('utf-8').decode(data.Body);
+      try {
+        const { body } = await getObjectBody(client, s3Creds.bucket, currentFile.id);
+        const text = new TextDecoder('utf-8').decode(body);
         setCurrentFile((prev) => {
           if (!prev || prev.type !== 's3' || prev.id !== currentFile.id) return prev;
           return { ...prev, content: text };
         });
         setEditorContent((prev) => {
-          // 혹시 사이에 입력이 생겼다면 덮어쓰지 않음
           if (prev !== editorContent) return prev;
           return text;
         });
         setLastAutoSyncAt(Date.now());
-      });
+      } catch (err) {
+        console.error('Auto sync S3 Read Error:', err);
+      }
     }, 5000);
 
     return () => clearInterval(interval);
@@ -1352,7 +1298,7 @@ export default function App() {
                 localRootHandle={localRootHandle}
                 currentFile={currentFile}
                 onSelectFile={selectFile}
-                onCreateItem={createItem}
+                onCreateItem={requestCreateItem}
                 onOpenLocalFolder={openLocalFolder}
                 onSetDeleteTarget={setDeleteTarget}
                 onOpenSettings={() => navigate('/settings')}
@@ -1562,6 +1508,31 @@ export default function App() {
         currentFile={currentFile}
         onClose={() => setIsMoveModalOpen(false)}
         onConfirm={handleConfirmMove}
+      />
+
+      {/* Create File/Folder Modal */}
+      <CreateItemModal
+        isOpen={createModalOpen}
+        type={createModalContext?.type}
+        parentLabel={
+          createModalContext
+            ? createModalContext.storageType === 's3'
+              ? createModalContext.parentPath
+                ? `S3: ${createModalContext.parentPath}`
+                : 'S3 루트'
+              : createModalContext.parentPath
+                ? `로컬: ${createModalContext.parentPath}`
+                : '로컬 루트'
+            : ''
+        }
+        onClose={() => {
+          if (!isCreateSubmitting) {
+            setCreateModalOpen(false);
+            setCreateModalContext(null);
+          }
+        }}
+        onSubmit={handleCreateItemSubmit}
+        isSubmitting={isCreateSubmitting}
       />
 
     </div>
