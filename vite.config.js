@@ -5,18 +5,21 @@ import path from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [react(), tailwindcss(),
     VitePWA({
       injectRegister: 'auto',
       registerType: 'autoUpdate',
       includeAssets: ['vite.svg'],
       manifest: {
-        name: 'S3HAIM',
-        short_name: 'S3HAIM',
+        name: 'S3 Haim - Markdown Notes',
+        short_name: 'S3 Haim',
         description: 'S3에 저장하는 마크다운 메모 앱',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
+        start_url: (process.env.VITE_BASE_PATH || '/').replace(/\/?$/, '/'),
+        scope: (process.env.VITE_BASE_PATH || '/').replace(/\/?$/, '/'),
         icons: [
           {
             src: '/vite.svg',
@@ -29,10 +32,10 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,ico,json}'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024, // 8MB
+        navigateFallback: (process.env.VITE_BASE_PATH || '/').replace(/\/?$/, '') + '/index.html',
       }
     })
   ],
-  base: process.env.VITE_BASE_PATH || '/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

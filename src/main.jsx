@@ -4,9 +4,11 @@ import { BrowserRouter } from 'react-router'
 import '@/index.css'
 import App from '@/App.jsx'
 
+const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '/'
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={base}>
       <App />
     </BrowserRouter>
   </StrictMode>,
