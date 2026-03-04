@@ -22,6 +22,7 @@ S3HAIM은 **마크다운**으로 메모를 작성하고, 그 내용을 **Amazon 
 - Web Ink API
 - 이미지 업로드 기능
     - 현재는 전혀 업로드되지 않는 상태.
+- router bug 수정: default router가 사라지는 버그 수정.
 - PWA 안정화
     - 현재 다른 route에서 설치하면 버그가 나는 경우가 있음. 안정화해서 vite path에서 작동하도록 해야함.
     - 설치시 기본 경로가 `/s3haim`이 되도록 할 것.
