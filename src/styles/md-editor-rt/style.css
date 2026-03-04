@@ -708,6 +708,7 @@
 .md-editor-preview h5,
 .md-editor-preview h6 {
   position: relative;
+  word-break: keep-all;
   word-wrap: break-word;
   overflow-wrap: break-word;
   margin: 1.4em 0 .8em;
@@ -3352,6 +3353,7 @@ svg.md-editor-icon {
 
 .md-editor-preview {
   font-size: 16px;
+  word-break: keep-all;
   word-wrap: break-word;
   overflow-wrap: break-word;
   display: flow-root;
