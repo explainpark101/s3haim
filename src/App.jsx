@@ -1461,6 +1461,7 @@ export default function App() {
 
     closeTimer = setTimeout(closeModal, 3000);
 
+    let deleteSucceeded = false;
     try {
       if (type === 's3') {
         const client = getS3Client();
@@ -1500,20 +1501,20 @@ export default function App() {
         setEditorContent('');
         navigate('/');
       }
+      deleteSucceeded = true;
     } catch (e) {
       alert("삭제 실패: " + e.message);
-      if (isFolder) {
-        setOperationStatus(`폴더 삭제 실패: ${e.message}`);
-      }
+      setOperationStatus(`삭제 실패: ${e.message}`);
     } finally {
-      clearTimeout(closeTimer);
+      if (closeTimer) clearTimeout(closeTimer);
       closeModal();
+      setIsDeleting(false);
       if (isFolder) {
         setIsDeletingFolder(false);
         setDeletingFolderPath(null);
-        if (!operationStatus.startsWith('폴더 삭제 실패')) {
-          setOperationStatus(`폴더 삭제 완료: ${node.path}`);
-        }
+      }
+      if (deleteSucceeded) {
+        setOperationStatus(isFolder ? `폴더 삭제 완료: ${node.path}` : `삭제 완료: ${node.path}`);
       }
     }
   };
@@ -2181,7 +2182,7 @@ export default function App() {
         associatedRecordings={associatedRecordings}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
-        isProcessing={isDeletingFolder && deleteTarget?.node?.type === 'folder'}
+        isProcessing={isDeleting}
       />
 
       {/* Move File Modal */}

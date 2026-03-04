@@ -83,8 +83,9 @@ export function DeleteConfirmModal({
         )}
         <div className="flex justify-end gap-2">
           <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-odp-fgStrong bg-gray-100 dark:bg-odp-bgSoft hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded transition"
+            onClick={isProcessing ? undefined : onCancel}
+            disabled={isProcessing}
+            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-odp-fgStrong bg-gray-100 dark:bg-odp-bgSoft hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             취소
           </button>
@@ -92,12 +93,15 @@ export function DeleteConfirmModal({
             type="button"
             onClick={isProcessing ? undefined : handleConfirm}
             disabled={isProcessing || !target}
-            className={`px-4 py-2 text-sm font-medium text-white rounded transition ${
+            className={`px-4 py-2 text-sm font-medium text-white rounded transition flex items-center gap-2 ${
               isProcessing
                 ? 'bg-red-400 cursor-wait'
                 : 'bg-red-600 hover:bg-red-700'
             }`}
           >
+            {isProcessing && (
+              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+            )}
             {isTrashRoot
               ? isProcessing
                 ? '비우는 중...'
