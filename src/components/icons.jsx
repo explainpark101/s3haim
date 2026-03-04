@@ -14,6 +14,7 @@ import {
   Download,
   Upload,
   Key,
+  Fingerprint,
   Sun,
   Moon,
   Image as ImageIcon,
@@ -41,6 +42,7 @@ export const IconLock = ({ size = 16, ...props }) => <Lock size={size} {...props
 export const IconDownload = ({ size = 14, ...props }) => <Download size={size} {...props} />;
 export const IconUpload = ({ size = 14, ...props }) => <Upload size={size} {...props} />;
 export const IconKey = ({ size = 16, ...props }) => <Key size={size} {...props} />;
+export const IconFingerprint = ({ size = 16, ...props }) => <Fingerprint size={size} {...props} />;
 export const IconSun = ({ size = 16, ...props }) => <Sun size={size} {...props} />;
 export const IconMoon = ({ size = 16, ...props }) => <Moon size={size} {...props} />;
 export const IconImage = ({ size = 14, ...props }) => <ImageIcon size={size} {...props} />;

@@ -9,9 +9,10 @@ export default function SettingsPage({
   onImportClick,
   showHiddenFolders,
   onToggleHiddenFolders,
-  onClose,
+  onRequestClose,
   webauthnSupported = false,
   webauthnEnabled = false,
+  webauthnStorageOnly = false,
   onEnableWebAuthn,
   onDisableWebAuthn,
 }) {
@@ -30,7 +31,7 @@ export default function SettingsPage({
         </h2>
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => onRequestClose?.(formCreds)}
           className="text-sm text-gray-500 hover:text-gray-800 hover:bg-gray-100 px-3 py-1 rounded transition"
         >
           닫기
@@ -113,7 +114,7 @@ export default function SettingsPage({
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onRequestClose?.(formCreds)}
               className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition"
             >
               취소
@@ -146,39 +147,58 @@ export default function SettingsPage({
           </div>
         </div>
 
-        {/* WebAuthn: 지문/보안 키로 잠금 해제 */}
-        {webauthnSupported && masterPassword && (
+        {/* WebAuthn: 지문/보안 키로 잠금 해제 또는 연결 정보 저장 */}
+        {webauthnSupported && (masterPassword || webauthnStorageOnly) && (
           <div className="bg-gray-50 dark:bg-odp-surface p-4 rounded-lg border border-gray-200 dark:border-odp-borderStrong">
-            <h3 className="text-sm font-bold text-gray-700 dark:text-odp-fgStrong mb-2">지문 / 보안 키로 잠금 해제</h3>
+            <h3 className="text-sm font-bold text-gray-700 dark:text-odp-fgStrong mb-2">지문 / 보안 키</h3>
             <p className="text-xs text-gray-600 dark:text-odp-muted mb-2">
-              지문, Windows Hello, Touch ID 등으로 앱 잠금 해제를 사용할 수 있습니다. JSON 내보내기 시에는 비밀번호를 사용합니다.
+              {webauthnStorageOnly
+                ? 'S3 연결 정보가 보안 키로만 암호화되어 있습니다. 데이터 백업/복원 시에는 비밀번호를 사용합니다.'
+                : '지문, Windows Hello, Touch ID 등으로 앱 잠금 해제를 사용할 수 있습니다. 데이터 백업/복원 시에는 비밀번호를 사용합니다.'}
             </p>
-            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-odp-fg">
-              <input
-                type="checkbox"
-                checked={webauthnEnabled}
-                disabled={webauthnLoading}
-                onChange={async (e) => {
-                  if (webauthnLoading) return;
-                  if (e.target.checked) {
-                    setWebauthnLoading(true);
+            {webauthnStorageOnly ? (
+              <p className="text-xs text-gray-600 dark:text-odp-muted">저장소: 보안 키로 보호됨</p>
+            ) : webauthnEnabled ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-700 dark:text-odp-fg">지문/보안 키로 잠금 해제 사용 중</span>
+                <button
+                  type="button"
+                  onClick={() => onDisableWebAuthn?.()}
+                  className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                >
+                  사용 해제
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  disabled={webauthnLoading}
+                  onClick={async () => {
+                    if (webauthnLoading || !onEnableWebAuthn) return;
+                    let promise;
                     try {
-                      await onEnableWebAuthn?.(masterPassword);
+                      promise = onEnableWebAuthn(masterPassword);
                     } catch (err) {
                       alert(err?.message || '보안 키 등록에 실패했습니다.');
-                      e.target.checked = false;
+                      return;
+                    }
+                    setWebauthnLoading(true);
+                    try {
+                      await promise;
+                    } catch (err) {
+                      alert(err?.message || '보안 키 등록에 실패했습니다.');
                     } finally {
                       setWebauthnLoading(false);
                     }
-                  } else {
-                    onDisableWebAuthn?.();
-                  }
-                }}
-                className="w-3 h-3 accent-blue-500"
-              />
-              <span>{webauthnEnabled ? '사용 중' : '지문/보안 키로 잠금 해제 사용'}</span>
-              {webauthnLoading && <span className="text-gray-400">등록 중…</span>}
-            </label>
+                  }}
+                  className="text-left text-xs py-2 px-3 rounded border border-gray-300 dark:border-odp-borderStrong hover:bg-gray-100 dark:hover:bg-odp-surface transition"
+                  aria-label="지문/보안 키로 잠금 해제 등록"
+                >
+                  {webauthnLoading ? '등록 중…' : '지문/보안 키로 잠금 해제 사용 (등록)'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -197,10 +217,10 @@ export default function SettingsPage({
         </div>
       </div>
 
-      {/* 간단한 비밀번호 안내 */}
-      {!masterPassword && (
+      {/* 비밀번호 안내: WebAuthn 미지원 시에만 */}
+      {!webauthnSupported && !masterPassword && (
         <div className="px-6 py-3 border-t border-gray-100 dark:border-odp-surface bg-yellow-50 dark:bg-odp-warningSoft text-xs text-yellow-800 dark:text-odp-warningText">
-          아직 마스터 비밀번호가 설정되지 않았습니다. 저장 시 비밀번호를 설정해야 합니다.
+          이 기기는 보안 키를 지원하지 않습니다. 저장 시 비밀번호를 설정해야 합니다.
         </div>
       )}
     </div>

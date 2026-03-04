@@ -5,7 +5,10 @@ import { encryptData, decryptData } from '@/utils/crypto';
 import {
   isWebAuthnPRFSupported,
   getStoredWebAuthn,
+  isStoredWithWebAuthn,
   unlockWithWebAuthn,
+  loadCredsWithWebAuthn,
+  saveCredsWithWebAuthn,
   enableWebAuthnUnlock,
   disableWebAuthnUnlock,
   updateWebAuthnWrappedPassword,
@@ -25,6 +28,9 @@ import Sidebar from '@/components/Sidebar';
 import EditorPane from '@/components/EditorPane';
 import { AuthModal } from '@/components/modals/AuthModal';
 import { SetPasswordModal } from '@/components/modals/SetPasswordModal';
+import { SaveMethodModal } from '@/components/modals/SaveMethodModal';
+import { ExportPasswordModal } from '@/components/modals/ExportPasswordModal';
+import { ImportPasswordModal } from '@/components/modals/ImportPasswordModal';
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
 import { MoveFileModal } from '@/components/modals/MoveFileModal';
@@ -84,6 +90,12 @@ export default function App() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createModalContext, setCreateModalContext] = useState(null);
   const [isCreateSubmitting, setIsCreateSubmitting] = useState(false);
+  const [showExportPasswordModal, setShowExportPasswordModal] = useState(false);
+  const [showImportPasswordModal, setShowImportPasswordModal] = useState(false);
+  const [importFileContent, setImportFileContent] = useState(null);
+  const [showSaveMethodModal, setShowSaveMethodModal] = useState(false);
+  const [saveMethodModalCreds, setSaveMethodModalCreds] = useState(null);
+  const [showUnsavedConfirmModal, setShowUnsavedConfirmModal] = useState(false);
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
@@ -194,20 +206,37 @@ export default function App() {
       const stored = localStorage.getItem('s3NotesEncrypted');
       if (!stored) throw new Error("저장된 데이터가 없습니다.");
       const encryptedObj = JSON.parse(stored);
+      if (encryptedObj?.webauthn) throw new Error("보안 키로 저장된 데이터는 비밀번호로 해제할 수 없습니다.");
       const decryptedStr = await decryptData(password, encryptedObj);
       const creds = JSON.parse(decryptedStr);
-      
+
       setS3Creds(creds);
       setMasterPassword(password);
       setIsUnlocked(true);
       setShowAuthModal(false);
     } catch (e) {
-      alert("비밀번호가 틀렸거나 데이터가 손상되었습니다.");
+      alert(e?.message || "비밀번호가 틀렸거나 데이터가 손상되었습니다.");
       console.error(e);
     }
   };
 
-  const saveEncryptedSettings = async (creds, password) => {
+  const handleUnlockWithWebAuthn = async () => {
+    if (isStoredWithWebAuthn()) {
+      const creds = await loadCredsWithWebAuthn();
+      setS3Creds(creds);
+      setMasterPassword('');
+      setIsUnlocked(true);
+      setShowAuthModal(false);
+      loadS3Files(creds);
+      navigate('/');
+    } else {
+      const password = await unlockWithWebAuthn();
+      if (password) await handleUnlock(password);
+    }
+  };
+
+  const saveEncryptedSettings = async (creds, password, options = {}) => {
+    const { stayOnSettings = false } = options;
     try {
       const encryptedObj = await encryptData(password, JSON.stringify(creds));
       localStorage.setItem('s3NotesEncrypted', JSON.stringify(encryptedObj));
@@ -222,22 +251,61 @@ export default function App() {
         }
       }
       loadS3Files(creds);
-      navigate('/');
+      if (!stayOnSettings) navigate('/');
     } catch (e) {
       alert("설정 저장 중 오류가 발생했습니다: " + e.message);
     }
   };
 
+  const isCredsDirty = (formCreds, savedCreds) => {
+    if (!formCreds || !savedCreds) return !!formCreds !== !!savedCreds;
+    return JSON.stringify(formCreds) !== JSON.stringify(savedCreds);
+  };
+
+  const handleSaveS3Creds = (creds) => {
+    setS3Creds(creds);
+    setSaveMethodModalCreds(creds);
+    setShowSaveMethodModal(true);
+  };
+
+  const handleSaveWithWebAuthn = async (creds) => {
+    await saveCredsWithWebAuthn(creds);
+    loadS3Files(creds);
+    setShowSaveMethodModal(false);
+    setSaveMethodModalCreds(null);
+  };
+
+  const handleSaveWithPasswordFromModal = () => {
+    setShowSaveMethodModal(false);
+    setSaveMethodModalCreds(null);
+    setShowSetPasswordModal(true);
+  };
+
   const handleExportCreds = () => {
-    const stored = localStorage.getItem('s3NotesEncrypted');
-    if (!stored) return alert("내보낼 데이터가 없습니다.");
-    const blob = new Blob([stored], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `s3-notes-credentials-${new Date().toISOString()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!s3Creds?.bucket && !localStorage.getItem('s3NotesEncrypted')) return alert("내보낼 데이터가 없습니다.");
+    setShowExportPasswordModal(true);
+  };
+
+  const handleExportConfirm = async (exportPassword) => {
+    try {
+      const dataToExport = s3Creds;
+      if (!dataToExport?.bucket) {
+        alert("내보낼 연결 정보가 없습니다. 먼저 설정에서 S3 연결 정보를 저장하세요.");
+        setShowExportPasswordModal(false);
+        return;
+      }
+      const encryptedObj = await encryptData(exportPassword, JSON.stringify(dataToExport));
+      const blob = new Blob([JSON.stringify(encryptedObj)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `s3-notes-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportPasswordModal(false);
+    } catch (e) {
+      alert("내보내기 중 오류가 발생했습니다: " + (e?.message || e));
+    }
   };
 
   const handleImportCreds = (e) => {
@@ -247,27 +315,58 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const content = event.target.result;
-        JSON.parse(content); // Validate JSON format
-        localStorage.setItem('s3NotesEncrypted', content);
-        alert("자격 증명이 성공적으로 불러와졌습니다. 비밀번호를 입력해 잠금을 해제하세요.");
-        setIsUnlocked(false);
-        setShowAuthModal(true);
-      } catch (err) {
+        const parsed = JSON.parse(content);
+        if (!parsed || typeof parsed !== 'object' || !parsed.salt || !parsed.iv || !parsed.ciphertext) {
+          alert("잘못된 백업 파일 형식입니다. 비밀번호로 암호화된 JSON 파일이어야 합니다.");
+          return;
+        }
+        setImportFileContent(content);
+        setShowImportPasswordModal(true);
+      } catch {
         alert("잘못된 파일 형식입니다.");
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // reset input
+    e.target.value = '';
   };
 
-  const handleSettingsClose = () => {
-    if (!masterPassword && localStorage.getItem('s3NotesEncrypted')) {
-      navigate('/');
-    } else if (!masterPassword) {
-      alert("마스터 비밀번호를 설정해야 창을 닫을 수 있습니다.");
-    } else {
-      navigate('/');
+  const handleImportConfirm = async (importPassword) => {
+    try {
+      const encryptedObj = JSON.parse(importFileContent);
+      const decryptedStr = await decryptData(importPassword, encryptedObj);
+      const creds = JSON.parse(decryptedStr);
+      setImportFileContent(null);
+      setShowImportPasswordModal(false);
+      if (webauthnPRFSupported) {
+        await saveCredsWithWebAuthn(creds);
+        setS3Creds(creds);
+        setMasterPassword('');
+        loadS3Files(creds);
+        navigate('/');
+        alert("복원되었습니다. 이 기기에서는 보안 키로 잠금 해제됩니다.");
+      } else {
+        await saveEncryptedSettings(creds, importPassword);
+      }
+    } catch (e) {
+      alert("비밀번호가 틀렸거나 파일이 손상되었습니다.");
     }
+  };
+
+  const handleSettingsClose = (formCreds) => {
+    if (!isUnlocked && localStorage.getItem('s3NotesEncrypted')) {
+      alert("저장소 잠금 해제 후 닫을 수 있습니다.");
+      return;
+    }
+    if (formCreds != null && isCredsDirty(formCreds, s3Creds)) {
+      setShowUnsavedConfirmModal(true);
+      return;
+    }
+    navigate('/');
+  };
+
+  const handleUnsavedConfirmLeave = () => {
+    setShowUnsavedConfirmModal(false);
+    navigate('/');
   };
 
   // 3. S3 Actions (using @aws-sdk/client-s3)
@@ -1339,8 +1438,13 @@ export default function App() {
         isOpen={showAuthModal}
         onUnlock={handleUnlock}
         fileInputRef={fileInputRef}
-        canUnlockWithWebAuthn={webauthnPRFSupported && !!getStoredWebAuthn()}
-        onUnlockWithWebAuthn={unlockWithWebAuthn}
+        canUnlockWithWebAuthn={
+          webauthnPRFSupported &&
+          !!getStoredWebAuthn() &&
+          (isStoredWithWebAuthn() || !!getStoredWebAuthn()?.encryptedPassword)
+        }
+        onUnlockWithWebAuthn={handleUnlockWithWebAuthn}
+        isPasswordMode={!isStoredWithWebAuthn()}
       />
 
       {/* Main UI (Blurred if locked) */}
@@ -1435,19 +1539,17 @@ export default function App() {
                 <SettingsPage
                   s3Creds={s3Creds}
                   masterPassword={masterPassword}
-                  onSaveS3Creds={(creds) => {
-                    setS3Creds(creds);
-                    setShowSetPasswordModal(true);
-                  }}
+                  onSaveS3Creds={handleSaveS3Creds}
                   onExportCreds={handleExportCreds}
                   onImportClick={() => fileInputRef.current?.click()}
                   showHiddenFolders={showHiddenFolders}
                   onToggleHiddenFolders={() =>
                     setShowHiddenFolders((prev) => !prev)
                   }
-                  onClose={handleSettingsClose}
+                  onRequestClose={handleSettingsClose}
                   webauthnSupported={webauthnPRFSupported}
-                  webauthnEnabled={!!getStoredWebAuthn()}
+                  webauthnEnabled={isStoredWithWebAuthn() || !!getStoredWebAuthn()?.encryptedPassword}
+                  webauthnStorageOnly={isStoredWithWebAuthn()}
                   onEnableWebAuthn={enableWebAuthnUnlock}
                   onDisableWebAuthn={disableWebAuthnUnlock}
                 />
@@ -1581,11 +1683,48 @@ export default function App() {
       </div>
 
       {/* Set Password Modal */}
+      <SaveMethodModal
+        isOpen={showSaveMethodModal}
+        onClose={() => {
+          setShowSaveMethodModal(false);
+          setSaveMethodModalCreds(null);
+        }}
+        creds={saveMethodModalCreds}
+        webauthnSupported={webauthnPRFSupported}
+        onSaveWithWebAuthn={handleSaveWithWebAuthn}
+        onSaveWithPassword={handleSaveWithPasswordFromModal}
+      />
+
       <SetPasswordModal
         isOpen={showSetPasswordModal}
         masterPassword={masterPassword}
         onCancel={() => setShowSetPasswordModal(false)}
-        onSubmit={(password) => saveEncryptedSettings(s3Creds, password)}
+        onSubmit={(password) => saveEncryptedSettings(s3Creds, password, { stayOnSettings: true })}
+      />
+
+      <ConfirmModal
+        isOpen={showUnsavedConfirmModal}
+        title="설정을 나가시겠습니까?"
+        message="저장하지 않으면 입력한 정보가 사라질 수 있습니다."
+        confirmLabel="나가기"
+        cancelLabel="취소"
+        onConfirm={handleUnsavedConfirmLeave}
+        onCancel={() => setShowUnsavedConfirmModal(false)}
+      />
+
+      <ExportPasswordModal
+        isOpen={showExportPasswordModal}
+        onConfirm={handleExportConfirm}
+        onCancel={() => setShowExportPasswordModal(false)}
+      />
+
+      <ImportPasswordModal
+        isOpen={showImportPasswordModal}
+        onConfirm={handleImportConfirm}
+        onCancel={() => {
+          setShowImportPasswordModal(false);
+          setImportFileContent(null);
+        }}
       />
 
       {/* Delete Modal */}

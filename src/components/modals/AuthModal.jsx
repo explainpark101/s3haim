@@ -2,15 +2,23 @@ import { useState } from 'react';
 import { IconLock } from '@/components/icons';
 import Modal from '@/components/modals/Modal';
 
-export function AuthModal({ isOpen, onUnlock, onUnlockWithWebAuthn, canUnlockWithWebAuthn, fileInputRef }) {
+export function AuthModal({ isOpen, onUnlock, onUnlockWithWebAuthn, canUnlockWithWebAuthn, isPasswordMode = true, fileInputRef }) {
   const [webauthnLoading, setWebauthnLoading] = useState(false);
 
+  // Safari: startAuthentication must run in native click context with no async work before it.
+  // Call WebAuthn flow first (sync until credentials.get), then set loading and await.
   const handleWebAuthnUnlock = async () => {
     if (!onUnlockWithWebAuthn || !canUnlockWithWebAuthn) return;
+    let promise;
+    try {
+      promise = onUnlockWithWebAuthn();
+    } catch (e) {
+      alert(e?.message || '지문/보안 키 인증에 실패했습니다.');
+      return;
+    }
     setWebauthnLoading(true);
     try {
-      const password = await onUnlockWithWebAuthn();
-      if (password) onUnlock(password);
+      await promise;
     } catch (e) {
       alert(e?.message || '지문/보안 키 인증에 실패했습니다.');
     } finally {
@@ -26,7 +34,9 @@ export function AuthModal({ isOpen, onUnlock, onUnlockWithWebAuthn, canUnlockWit
         </div>
         <h2 className="text-xl font-bold text-gray-800 dark:text-odp-fgStrong mb-2">저장소 잠금 해제</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-          마스터 비밀번호를 입력하거나, 등록한 지문/보안 키로 해제하세요.
+          {canUnlockWithWebAuthn
+            ? '등록한 지문/보안 키로 해제하거나, 아래에서 백업 파일을 불러오세요.'
+            : '마스터 비밀번호를 입력하거나, 아래에서 백업 파일을 불러오세요.'}
         </p>
 
         {canUnlockWithWebAuthn && (
@@ -35,38 +45,41 @@ export function AuthModal({ isOpen, onUnlock, onUnlockWithWebAuthn, canUnlockWit
             onClick={handleWebAuthnUnlock}
             disabled={webauthnLoading}
             className="w-full bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white font-medium py-3 rounded-lg transition shadow-sm mb-4"
+            aria-label="지문 또는 보안 키로 잠금 해제"
           >
             {webauthnLoading ? '인증 중…' : '지문 또는 보안 키로 잠금 해제'}
           </button>
         )}
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onUnlock(e.target.password.value);
-          }}
-        >
-          <input
-            type="password"
-            name="password"
-            required
-            autoFocus={!canUnlockWithWebAuthn}
-            placeholder="마스터 비밀번호"
-            className="w-full border border-gray-300 dark:border-odp-borderStrong bg-white dark:bg-odp-bgSoft text-gray-800 dark:text-odp-fgStrong rounded-lg px-4 py-3 text-center mb-4 focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-200 dark:focus:ring-odp-warningText transition"
-          />
-          <button
-            type="submit"
-            className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-medium py-3 rounded-lg transition shadow-sm mb-4"
+        {isPasswordMode && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              onUnlock(e.target.password.value);
+            }}
           >
-            비밀번호로 잠금 해제
-          </button>
-        </form>
+            <input
+              type="password"
+              name="password"
+              required
+              autoFocus={!canUnlockWithWebAuthn}
+              placeholder="마스터 비밀번호"
+              className="w-full border border-gray-300 dark:border-odp-borderStrong bg-white dark:bg-odp-bgSoft text-gray-800 dark:text-odp-fgStrong rounded-lg px-4 py-3 text-center mb-4 focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-200 dark:focus:ring-odp-warningText transition"
+            />
+            <button
+              type="submit"
+              className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-medium py-3 rounded-lg transition shadow-sm mb-4"
+            >
+              비밀번호로 잠금 해제
+            </button>
+          </form>
+        )}
 
         <button
           onClick={() => fileInputRef.current?.click()}
           className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-[#f0f0f0] underline transition"
         >
-          기존 연결 정보 파일(.json) 불러오기
+          백업 파일(.json) 불러오기
         </button>
       </div>
     </Modal>

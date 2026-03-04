@@ -1,6 +1,9 @@
 /**
  * WebAuthn PRF for passkey-based unlock (fingerprint, Windows Hello, etc.).
  * Uses @simplewebauthn/browser for registration and buffer helpers; PRF auth uses raw get() for binary salt.
+ *
+ * Safari: startRegistration/startAuthentication must be invoked from a native click with no async work
+ * (no await, no fetch) before the call. See https://simplewebauthn.dev/docs/advanced/browser-quirks
  */
 
 import {
@@ -11,7 +14,9 @@ import {
 } from '@simplewebauthn/browser';
 
 const S3HAIM_PRF_INFO = new TextEncoder().encode('S3 Haim Master Password Wrap V1');
+const S3HAIM_CREDS_INFO = new TextEncoder().encode('S3 Haim Creds Encryption V1');
 const WEB_AUTHN_STORAGE_KEY = 's3NotesWebAuthn';
+const ENCRYPTED_STORAGE_KEY = 's3NotesEncrypted';
 
 function bufToBase64(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -71,6 +76,31 @@ async function deriveWrapKey(prfOutput) {
 }
 
 /**
+ * Derive AES-GCM key for S3 creds encryption (different from password wrap).
+ */
+async function deriveCredsKey(prfOutput) {
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    prfOutput,
+    'HKDF',
+    false,
+    ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt: new Uint8Array(0),
+      hash: 'SHA-256',
+      info: S3HAIM_CREDS_INFO,
+    },
+    masterKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/**
  * Create a passkey with PRF enabled via @simplewebauthn/browser.
  * Returns credentialId (base64url) and salt (base64) for later get().
  */
@@ -106,8 +136,11 @@ export async function createPasskeyWithPRF() {
   const prfOut = credential?.clientExtensionResults?.prf;
   if (!prfOut?.enabled) throw new Error('이 기기에서 PRF(지문/보안 키 암호화)를 지원하지 않습니다.');
 
+  const rawId = credential.rawId;
+  const credentialIdStr = typeof rawId === 'string' ? rawId : bufferToBase64URLString(rawId);
+
   return {
-    credentialId: credential.rawId,
+    credentialId: credentialIdStr,
     salt: bufToBase64(salt),
   };
 }
@@ -186,7 +219,7 @@ export function getStoredWebAuthn() {
     const raw = localStorage.getItem(WEB_AUTHN_STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data?.credentialId || !data?.salt || !data?.encryptedPassword) return null;
+    if (!data?.credentialId || !data?.salt) return null;
     return data;
   } catch {
     return null;
@@ -234,4 +267,84 @@ export async function updateWebAuthnWrappedPassword(newMasterPassword) {
   const prfKey = await getPasskeyPRFKey(stored.credentialId, stored.salt);
   const encryptedPassword = await wrapPasswordWithPRFKey(prfKey, newMasterPassword);
   setStoredWebAuthn({ ...stored, encryptedPassword });
+}
+
+/**
+ * Whether stored creds are encrypted with WebAuthn (no password).
+ */
+export function isStoredWithWebAuthn() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ENCRYPTED_STORAGE_KEY) : null;
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    return data?.webauthn === true && getStoredWebAuthn() != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Encrypt S3 creds JSON with PRF-derived key. Returns { iv, ciphertext, webauthn: true }.
+ */
+async function encryptCredsWithPRFKey(prfKeyOutput, credsJson) {
+  const key = await deriveCredsKey(prfKeyOutput);
+  const iv = randomBytes(12);
+  const encoded = new TextEncoder().encode(credsJson);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encoded,
+  );
+  return {
+    iv: bufToBase64(iv),
+    ciphertext: bufToBase64(ciphertext),
+    webauthn: true,
+  };
+}
+
+/**
+ * Decrypt S3 creds blob (webauthn format) with PRF-derived key.
+ */
+async function decryptCredsWithPRFKey(prfKeyOutput, blob) {
+  const key = await deriveCredsKey(prfKeyOutput);
+  const iv = base64ToBuf(blob.iv);
+  const ciphertext = base64ToBuf(blob.ciphertext);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    ciphertext,
+  );
+  return new TextDecoder().decode(decrypted);
+}
+
+/**
+ * Save S3 creds using WebAuthn: create passkey if needed, encrypt with PRF key, store.
+ */
+export async function saveCredsWithWebAuthn(creds) {
+  let stored = getStoredWebAuthn();
+  if (!stored?.credentialId || !stored.salt) {
+    const created = await createPasskeyWithPRF();
+    stored = { credentialId: created.credentialId, salt: created.salt };
+    setStoredWebAuthn(stored);
+  }
+  const prfKey = await getPasskeyPRFKey(stored.credentialId, stored.salt);
+  const encrypted = await encryptCredsWithPRFKey(prfKey, JSON.stringify(creds));
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(ENCRYPTED_STORAGE_KEY, JSON.stringify(encrypted));
+  }
+}
+
+/**
+ * Load S3 creds using WebAuthn (PRF assertion). Returns decrypted creds object.
+ */
+export async function loadCredsWithWebAuthn() {
+  const stored = getStoredWebAuthn();
+  if (!stored) throw new Error('등록된 보안 키가 없습니다.');
+  const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ENCRYPTED_STORAGE_KEY) : null;
+  if (!raw) throw new Error('저장된 연결 정보가 없습니다.');
+  const blob = JSON.parse(raw);
+  if (blob?.webauthn !== true) throw new Error('보안 키로 저장된 데이터가 아닙니다.');
+  const prfKey = await getPasskeyPRFKey(stored.credentialId, stored.salt);
+  const decryptedStr = await decryptCredsWithPRFKey(prfKey, blob);
+  return JSON.parse(decryptedStr);
 }
