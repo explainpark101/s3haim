@@ -63,11 +63,13 @@ export async function getObjectBody(client, bucket, key) {
 
 /**
  * Put object.
+ * Response Cache-Control is set to max-age=30 so GET responses are cached at most 30 seconds.
  * @param {S3Client} client
- * @param {{ Bucket: string, Key: string, Body: string | Uint8Array, ContentType?: string }} params
+ * @param {{ Bucket: string, Key: string, Body: string | Uint8Array, ContentType?: string, CacheControl?: string }} params
  */
 export async function putObject(client, params) {
-  await client.send(new PutObjectCommand(params));
+  const withCache = { ...params, CacheControl: params.CacheControl ?? 'max-age=30' };
+  await client.send(new PutObjectCommand(withCache));
 }
 
 /**
@@ -95,6 +97,7 @@ export async function deleteObjects(client, bucket, objects) {
 
 /**
  * Copy object within the same bucket.
+ * Sets CacheControl to max-age=30 on the copy.
  */
 export async function copyObject(client, bucket, copySourceKey, key) {
   const copySource = `${bucket}/${encodeURIComponent(copySourceKey)}`;
@@ -103,6 +106,7 @@ export async function copyObject(client, bucket, copySourceKey, key) {
       Bucket: bucket,
       CopySource: copySource,
       Key: key,
+      CacheControl: 'max-age=30',
     })
   );
 }

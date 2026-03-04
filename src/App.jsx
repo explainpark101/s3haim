@@ -96,6 +96,10 @@ export default function App() {
   const [showSaveMethodModal, setShowSaveMethodModal] = useState(false);
   const [saveMethodModalCreds, setSaveMethodModalCreds] = useState(null);
   const [showUnsavedConfirmModal, setShowUnsavedConfirmModal] = useState(false);
+  const [editedFileName, setEditedFileName] = useState('');
+  const [showSuffixChangeConfirmModal, setShowSuffixChangeConfirmModal] = useState(false);
+  const [suffixConfirmAction, setSuffixConfirmAction] = useState('renameOnly'); // 'renameOnly' | 'renameAndSave'
+  const [showCloseFileConfirmModal, setShowCloseFileConfirmModal] = useState(false);
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
@@ -123,6 +127,22 @@ export default function App() {
       document.title = 's3Haim';
     }
   }, [currentFile]);
+
+  useEffect(() => {
+    setEditedFileName(currentFile?.name ?? '');
+  }, [currentFile?.id, currentFile?.name]);
+
+  const getExt = (fileName) => {
+    if (!fileName || typeof fileName !== 'string') return '';
+    const lastDot = fileName.lastIndexOf('.');
+    return lastDot > 0 ? fileName.slice(lastDot) : '';
+  };
+
+  const hasSuffixChange = () => {
+    if (!currentFile?.name) return false;
+    const trimmed = (editedFileName ?? '').trim();
+    return trimmed !== currentFile.name && getExt(trimmed) !== getExt(currentFile.name);
+  };
 
   useEffect(() => {
     const mql = window.matchMedia('(max-width: 768px)');
@@ -367,6 +387,61 @@ export default function App() {
   const handleUnsavedConfirmLeave = () => {
     setShowUnsavedConfirmModal(false);
     navigate('/');
+  };
+
+  const handleSuffixChangeConfirm = async () => {
+    const trimmed = (editedFileName ?? '').trim();
+    if (!trimmed || !currentFile) {
+      setShowSuffixChangeConfirmModal(false);
+      return;
+    }
+    const isRenameAndSave = suffixConfirmAction === 'renameAndSave';
+    setShowSuffixChangeConfirmModal(false);
+    try {
+      const updated = await renameCurrentFileFullName(trimmed);
+      if (isRenameAndSave && updated) {
+        await saveFile(updated);
+      }
+    } catch {
+      // rename/save errors already handled inside
+    }
+  };
+
+  const handleSuffixChangeCancel = () => {
+    setShowSuffixChangeConfirmModal(false);
+    if (suffixConfirmAction === 'renameOnly') {
+      setEditedFileName(currentFile?.name ?? '');
+    }
+  };
+
+  const hasUnsavedEditorChanges = () => {
+    if (!currentFile) return false;
+    const editable = ['markdown', 'json', 'raw'].includes(currentFile.viewer || 'markdown');
+    return editable && currentFile.content !== editorContent;
+  };
+
+  const closeCurrentFile = () => {
+    setCurrentFile(null);
+    navigate('/');
+  };
+
+  const handleRequestCloseEditor = () => {
+    if (hasUnsavedEditorChanges()) {
+      setShowCloseFileConfirmModal(true);
+    } else {
+      closeCurrentFile();
+    }
+  };
+
+  const handleCloseFileConfirmSave = async () => {
+    setShowCloseFileConfirmModal(false);
+    await saveFile(null, { skipSuffixCheck: true });
+    closeCurrentFile();
+  };
+
+  const handleCloseFileConfirmDiscard = () => {
+    setShowCloseFileConfirmModal(false);
+    closeCurrentFile();
   };
 
   // 3. S3 Actions (using @aws-sdk/client-s3)
@@ -868,38 +943,46 @@ export default function App() {
     }
   };
 
-  const saveFile = async () => {
-    if (!currentFile) return;
-    const viewer = currentFile.viewer || 'markdown';
+  const saveFile = async (fileOverride = null, options = {}) => {
+    const { skipSuffixCheck = false } = options;
+    const fileToSave = fileOverride ?? currentFile;
+    if (!fileToSave) return;
+    if (!skipSuffixCheck && !fileOverride && hasSuffixChange()) {
+      setSuffixConfirmAction('renameAndSave');
+      setShowSuffixChangeConfirmModal(true);
+      return;
+    }
+    const viewer = fileToSave.viewer || 'markdown';
     const editableViewers = ['markdown', 'json', 'raw'];
     if (!editableViewers.includes(viewer)) return;
     setIsSaving(true);
     try {
-      if (currentFile.type === 's3') {
+      if (fileToSave.type === 's3') {
         const client = getS3Client();
         if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
         const contentType =
           viewer === 'json' ? 'application/json' : viewer === 'raw' ? 'text/plain' : 'text/markdown';
         await putObject(client, {
           Bucket: s3Creds.bucket,
-          Key: currentFile.id,
+          Key: fileToSave.id,
           Body: editorContent,
           ContentType: contentType,
         });
         loadS3Files();
-      } else if (currentFile.type === 'local') {
-        const writable = await currentFile.handle.createWritable();
+      } else if (fileToSave.type === 'local') {
+        const writable = await fileToSave.handle.createWritable();
         await writable.write(editorContent);
         await writable.close();
-        const file = await currentFile.handle.getFile();
-        setCurrentFile((prev) => ({
-          ...prev,
-          content: editorContent,
-          size: typeof file.size === 'number' ? file.size : prev?.size ?? null,
-        }));
+        const file = await fileToSave.handle.getFile();
+        setCurrentFile((prev) => (
+          prev?.id === fileToSave.id
+            ? { ...prev, content: editorContent, size: typeof file.size === 'number' ? file.size : prev?.size ?? null }
+            : prev
+        ));
+        setIsSaving(false);
         return;
       }
-      setCurrentFile(prev => ({ ...prev, content: editorContent }));
+      setCurrentFile((prev) => (prev?.id === fileToSave.id ? { ...prev, content: editorContent } : prev));
     } catch (e) {
       alert("저장 실패: " + e.message);
     } finally {
@@ -950,9 +1033,9 @@ export default function App() {
   };
 
   const renameCurrentFileFullName = async (newFullName) => {
-    if (!currentFile) return;
+    if (!currentFile) return null;
     const trimmed = newFullName.trim();
-    if (!trimmed) return;
+    if (!trimmed) return null;
 
     try {
       let updated = null;
@@ -964,8 +1047,10 @@ export default function App() {
       if (updated) {
         setCurrentFile(updated);
       }
+      return updated ?? null;
     } catch (e) {
       alert("이름 변경 실패: " + e.message);
+      return null;
     }
   };
 
@@ -1569,8 +1654,14 @@ export default function App() {
                   onChangeEditor={handleEditorChange}
                   onSave={saveFile}
                   isSaving={isSaving}
-                  onRenameTitle={renameCurrentFileTitle}
+                  editedFileName={editedFileName}
+                  setEditedFileName={setEditedFileName}
                   onRenameFullName={renameCurrentFileFullName}
+                  onRequestSuffixChangeConfirmForBlur={() => {
+                    setSuffixConfirmAction('renameOnly');
+                    setShowSuffixChangeConfirmModal(true);
+                  }}
+                  onRequestClose={handleRequestCloseEditor}
                   onRequestMove={handleRequestMove}
                   onViewUnsupportedAsText={handleViewUnsupportedAsText}
                   onDownloadCurrentFile={handleDownloadCurrentFile}
@@ -1600,8 +1691,14 @@ export default function App() {
                   onChangeEditor={handleEditorChange}
                   onSave={saveFile}
                   isSaving={isSaving}
-                  onRenameTitle={renameCurrentFileTitle}
+                  editedFileName={editedFileName}
+                  setEditedFileName={setEditedFileName}
                   onRenameFullName={renameCurrentFileFullName}
+                  onRequestSuffixChangeConfirmForBlur={() => {
+                    setSuffixConfirmAction('renameOnly');
+                    setShowSuffixChangeConfirmModal(true);
+                  }}
+                  onRequestClose={handleRequestCloseEditor}
                   onRequestMove={handleRequestMove}
                   onViewUnsupportedAsText={handleViewUnsupportedAsText}
                   onDownloadCurrentFile={handleDownloadCurrentFile}
@@ -1715,6 +1812,28 @@ export default function App() {
         cancelLabel="취소"
         onConfirm={handleUnsavedConfirmLeave}
         onCancel={() => setShowUnsavedConfirmModal(false)}
+      />
+
+      <ConfirmModal
+        isOpen={showSuffixChangeConfirmModal}
+        title="확장자 변경"
+        message="확장자가 변경되었습니다. 저장 시 새 파일명으로 저장됩니다. 계속하시겠습니까?"
+        confirmLabel="계속"
+        cancelLabel="취소"
+        onConfirm={handleSuffixChangeConfirm}
+        onCancel={handleSuffixChangeCancel}
+      />
+
+      <ConfirmModal
+        isOpen={showCloseFileConfirmModal}
+        title="파일 닫기"
+        message="저장하지 않은 변경사항이 있습니다. 저장 후 닫으시겠습니까?"
+        confirmLabel="저장 후 닫기"
+        cancelLabel="취소"
+        discardLabel="저장 안 하고 닫기"
+        onConfirm={handleCloseFileConfirmSave}
+        onCancel={() => setShowCloseFileConfirmModal(false)}
+        onDiscard={handleCloseFileConfirmDiscard}
       />
 
       <ExportPasswordModal

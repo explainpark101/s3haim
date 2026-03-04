@@ -6,9 +6,12 @@ export function ConfirmModal({
   message,
   confirmLabel = '확인',
   cancelLabel = '취소',
+  discardLabel,
   onConfirm,
   onCancel,
+  onDiscard,
 }) {
+  const hasDiscard = discardLabel && typeof onDiscard === 'function';
   return (
     <Modal isOpen={isOpen}>
       <div className="p-6">
@@ -30,6 +33,15 @@ export function ConfirmModal({
           >
             {cancelLabel}
           </button>
+          {hasDiscard && (
+            <button
+              type="button"
+              onClick={onDiscard}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-odp-fgStrong bg-gray-100 dark:bg-odp-bgSoft hover:bg-gray-200 dark:hover:bg-odp-focusBg rounded transition"
+            >
+              {discardLabel}
+            </button>
+          )}
           <button
             type="button"
             onClick={onConfirm}

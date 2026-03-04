@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   IconCloud,
   IconDownload,
@@ -12,6 +12,7 @@ import MarkdownEditor from '@/components/MarkdownEditor';
 import MonacoTextEditor from '@/components/MonacoTextEditor';
 import Button from '@/components/Button';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
+import { X } from 'lucide-react';
 
 export default function EditorPane({
   currentFile,
@@ -20,29 +21,25 @@ export default function EditorPane({
   onSave,
   isSaving,
   onRequestDelete,
-  onRenameTitle,
+  editedFileName = '',
+  setEditedFileName,
   onRenameFullName,
+  onRequestSuffixChangeConfirmForBlur,
+  onRequestClose,
   onRequestMove,
   onViewUnsupportedAsText,
   onDownloadCurrentFile,
   theme = 'light',
   previewOnly = false,
 }) {
-  const [title, setTitle] = useState('');
-  const [isExtConfirmOpen, setIsExtConfirmOpen] = useState(false);
   const [pdfIframeKey, setPdfIframeKey] = useState(0);
   const pdfIframeRef = useRef(null);
 
-  useEffect(() => {
-    if (currentFile) {
-      const name = currentFile.name || '';
-      const lastDot = name.lastIndexOf('.');
-      const base = lastDot > 0 ? name.slice(0, lastDot) : name;
-      setTitle(base);
-    } else {
-      setTitle('');
-    }
-  }, [currentFile]);
+  const getExt = (fileName) => {
+    if (!fileName || typeof fileName !== 'string') return '';
+    const lastDot = fileName.lastIndexOf('.');
+    return lastDot > 0 ? fileName.slice(lastDot) : '';
+  };
 
   if (!currentFile) {
     return (
@@ -57,96 +54,26 @@ export default function EditorPane({
   const isEditableViewer = viewer === 'markdown' || viewer === 'json' || viewer === 'raw';
   const hasUnsavedChanges = isEditableViewer && currentFile.content !== editorContent;
 
-  const name = currentFile.name || '';
-  const lastDot = name.lastIndexOf('.');
-  const baseName = lastDot > 0 ? name.slice(0, lastDot) : name;
-  const ext = lastDot > 0 ? name.slice(lastDot) : '';
-  const isMarkdownExt = ext === '.md';
+  const currentName = currentFile.name || '';
 
-  const getTitleVisualLength = (text) => {
-    const s = text || '제목 없음';
-    let total = 0;
-    for (const ch of s) {
-      if (/[ \.]/.test(ch)) {
-        total += 1;
-      } else {
-        total += 1.3;
-      }
-    }
-    return total;
-  };
-
-  const handleTitleBlur = () => {
-    if (!currentFile) return;
-    const trimmed = title.trim();
-    const originalBase = baseName;
-
+  const handleFileNameBlur = () => {
+    if (!currentFile || typeof setEditedFileName !== 'function') return;
+    const trimmed = (editedFileName ?? '').trim();
     if (!trimmed) {
-      setTitle(originalBase);
+      setEditedFileName(currentName);
       return;
     }
-
     if (trimmed.includes('/')) {
-      alert("제목에는 '/' 문자를 사용할 수 없습니다.");
-      setTitle(originalBase);
+      alert("파일명에는 '/' 문자를 사용할 수 없습니다.");
+      setEditedFileName(currentName);
       return;
     }
-
-    if (trimmed === originalBase) return;
-    onRenameTitle(trimmed);
-  };
-
-  const handleExtensionDoubleClick = () => {
-    if (!currentFile) return;
-    if (!isMarkdownExt) return;
-    setIsExtConfirmOpen(true);
-  };
-
-  const handleConfirmExtensionChange = () => {
-    if (!currentFile || !isMarkdownExt) {
-      setIsExtConfirmOpen(false);
+    if (trimmed === currentName) return;
+    if (getExt(trimmed) !== getExt(currentName)) {
+      onRequestSuffixChangeConfirmForBlur?.();
       return;
     }
-
-    const currentExtWithoutDot = ext.slice(1) || 'md';
-    const input = window.prompt(
-      '새 확장자를 입력하세요. 점(.)은 제외하고 입력합니다.\n예: txt, markdown',
-      currentExtWithoutDot,
-    );
-    if (!input) {
-      setIsExtConfirmOpen(false);
-      return;
-    }
-
-    const cleaned = input.trim().replace(/^\./, '');
-    if (!cleaned) {
-      setIsExtConfirmOpen(false);
-      return;
-    }
-    if (cleaned.includes('/')) {
-      alert("확장자에는 '/' 문자를 사용할 수 없습니다.");
-      setIsExtConfirmOpen(false);
-      return;
-    }
-
-    const newExtWithDot = `.${cleaned}`;
-    const baseForRename = (title || baseName).trim();
-    if (!baseForRename) {
-      alert('파일 이름이 비어 있습니다.');
-      setIsExtConfirmOpen(false);
-      return;
-    }
-
-    const newFullName = `${baseForRename}${newExtWithDot}`;
-    if (newFullName === name) {
-      setIsExtConfirmOpen(false);
-      return;
-    }
-
-    if (onRenameFullName) {
-      onRenameFullName(newFullName);
-    }
-    setIsExtConfirmOpen(false);
+    onRenameFullName?.(trimmed);
   };
 
   const handlePdfRefresh = () => {
@@ -161,36 +88,21 @@ export default function EditorPane({
   
   return (
     <div className="flex-1 flex flex-col min-w-0 max-h-full">
-      <div className="h-14 border-b border-gray-200 dark:border-odp-bgSofter bg-white dark:bg-odp-surface flex items-center justify-between px-6 shrink-0">
-        <div className="flex items-center gap-3 text-gray-700 dark:text-odp-fgStrong font-medium min-w-0">
+      <div className="h-14 border-b border-gray-200 dark:border-odp-bgSofter bg-white dark:bg-odp-surface flex items-center justify-between px-6 shrink-0 w-full gap-2">
+        <div className="flex items-center gap-3 text-gray-700 dark:text-odp-fgStrong font-medium min-w-0 w-full">
           {currentFile.type === 's3' ? <IconCloud /> : <IconFolder />}
-          <div className="flex items-baseline gap-1 min-w-0">
+          <div className="flex items-baseline min-w-0 flex-1 gap-1">
+            {hasUnsavedChanges && <span className="text-red-500 text-xl leading-none shrink-0">*</span>}
             <input
-              className="bg-transparent border-none outline-none text-sm md:text-base font-medium placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-[3em] max-w-[100%]"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={handleTitleBlur}
-              placeholder="제목 없음"
-              style={{
-                // width: `${Math.max(getTitleVisualLength(title), 12)}ch`,
-                // width: 'max-content'
-              }}
+              className="bg-transparent border-none outline-none text-sm md:text-base font-medium placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-[3em] w-full"
+              value={editedFileName ?? ''}
+              onChange={(e) => setEditedFileName?.(e.target.value)}
+              onBlur={handleFileNameBlur}
+              placeholder="파일명"
             />
-            {ext && (
-              <span
-                className={`text-xs text-gray-400 dark:text-gray-500 shrink-0 ${
-                  isMarkdownExt ? 'cursor-pointer' : ''
-                }`}
-                onDoubleClick={isMarkdownExt ? handleExtensionDoubleClick : undefined}
-                title={isMarkdownExt ? '확장자를 변경하려면 더블클릭하세요.' : undefined}
-              >
-                {ext}
-              </span>
-            )}
           </div>
-          {hasUnsavedChanges && <span className="text-red-500 text-xl leading-none">*</span>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 justify-end shrink-0">
           {viewer === 'pdf' && (
             <Button
               type="button"
@@ -234,6 +146,18 @@ export default function EditorPane({
             <IconSave />
             <span className="hidden md:inline"> {isSaving ? '저장 중...' : '저장'}</span>
           </Button>
+          {!previewOnly && (
+            <Button
+              type="button"
+              variant="tertiary"
+              size="sm"
+              onClick={() => onRequestClose?.()}
+              title="닫기"
+              aria-label="파일 닫기"
+            >
+              <X size={16} />
+            </Button>
+          )}
         </div>
       </div>
       <div className="flex-1 flex overflow-hidden bg-white dark:bg-odp-surface h-full">
@@ -331,15 +255,6 @@ export default function EditorPane({
           </div>
         )}
       </div>
-      <ConfirmModal
-        isOpen={isExtConfirmOpen}
-        title="확장자 변경"
-        message={'확장자를 변경하면 파일 형식이 바뀔 수 있습니다.\n계속하시겠습니까?'}
-        confirmLabel="변경"
-        cancelLabel="취소"
-        onCancel={() => setIsExtConfirmOpen(false)}
-        onConfirm={handleConfirmExtensionChange}
-      />
     </div>
   );
 }

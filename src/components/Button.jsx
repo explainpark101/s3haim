@@ -13,6 +13,8 @@ const variantClasses = {
     'bg-odp-accentRed hover:bg-red-600 text-white dark:bg-odp-accentRed dark:hover:bg-red-600',
   secondary:
     'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-odp-bgSoft dark:hover:bg-odp-focusBg dark:text-odp-fgStrong',
+  tertiary:
+    'bg-transparent hover:bg-gray-100 text-gray-700 dark:hover:bg-odp-focusBg dark:text-odp-fgStrong',
 };
 
 export default function Button({

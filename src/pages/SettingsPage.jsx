@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { IconDownload, IconSettings, IconUpload } from '@/components/icons';
+import { X } from 'lucide-react';
 
 export default function SettingsPage({
   s3Creds,
@@ -25,16 +26,16 @@ export default function SettingsPage({
 
   return (
     <div className="flex-1 flex flex-col bg-white dark:bg-odp-bgSofter min-w-0 max-h-full">
-      <div className="px-6 py-4 border-b border-gray-100 dark:border-odp-surface flex justify-between items-center bg-gray-50 dark:bg-odp-surface shrink-0">
+      <div className="px-6 py-3 border-b border-gray-100 dark:border-odp-surface flex justify-between items-center bg-gray-50 dark:bg-odp-surface shrink-0">
         <h2 className="font-bold text-gray-700 dark:text-odp-fgStrong flex items-center gap-2">
           <IconSettings /> 설정 및 암호화
         </h2>
         <button
           type="button"
           onClick={() => onRequestClose?.(formCreds)}
-          className="text-sm text-gray-500 hover:text-gray-800 hover:bg-gray-100 px-3 py-1 rounded transition"
+          className="text-sm text-gray-500 hover:text-gray-800 hover:bg-gray-100 p-2 rounded transition"
         >
-          닫기
+          <X size={16} />
         </button>
       </div>
 
