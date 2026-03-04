@@ -422,6 +422,9 @@ export default function App() {
 
   const closeCurrentFile = () => {
     setCurrentFile(null);
+    try {
+      localStorage.removeItem('s3haim_lastFile');
+    } catch (_) {}
     navigate('/');
   };
 
@@ -1413,9 +1416,9 @@ export default function App() {
     }
   };
 
-  // 7. Auto Save (S3 only, 5s debounce)
+  // 7. Auto Save (S3 & local, 5s debounce)
   useEffect(() => {
-    if (!currentFile || currentFile.type !== 's3') return;
+    if (!currentFile || (currentFile.type !== 's3' && currentFile.type !== 'local')) return;
     if (currentFile.viewer !== 'markdown') return;
     if (!lastInputAt) return;
 
@@ -1423,7 +1426,7 @@ export default function App() {
     const timeout = setTimeout(async () => {
       // 입력 이후 내용이 변경된 상태만 자동 저장
       if (currentFile.content === editorContent) return;
-      if (!currentFile || currentFile.type !== 's3') return;
+      if (!currentFile || (currentFile.type !== 's3' && currentFile.type !== 'local')) return;
       try {
         await saveFile();
         setLastAutoSaveAt(now);
@@ -1506,13 +1509,14 @@ export default function App() {
   };
 
   const isS3Current = currentFile?.type === 's3';
-  const hasUnsavedForS3 =
-    isS3Current && currentFile && currentFile.content !== editorContent;
-  const hasAutoSaved = isS3Current && !!lastAutoSaveAt;
+  const isEditableStorage = currentFile?.type === 's3' || currentFile?.type === 'local';
+  const hasUnsavedChanges =
+    isEditableStorage && currentFile && currentFile.content !== editorContent;
+  const hasAutoSaved = isEditableStorage && !!lastAutoSaveAt;
 
-  const autoSaveIndicatorClass = !isS3Current
+  const autoSaveIndicatorClass = !isEditableStorage
     ? 'bg-gray-300'
-    : hasUnsavedForS3
+    : hasUnsavedChanges
     ? 'bg-yellow-400 animate-pulse'
     : hasAutoSaved
     ? 'bg-green-500'
@@ -1751,21 +1755,21 @@ export default function App() {
             )}
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <span className="flex items-center gap-1 md:gap-1.5" title={currentFile?.type === 's3' ? (lastAutoSaveAt ? `저장 ${formatTime(lastAutoSaveAt)}` : '대기 중') : '대상 아님'}>
+            <span className="flex items-center gap-1 md:gap-1.5" title={isEditableStorage ? (lastAutoSaveAt ? `저장 ${formatTime(lastAutoSaveAt)}` : '대기 중') : '대상 아님'}>
               <span
                 className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full shrink-0 ${autoSaveIndicatorClass}`}
                 aria-hidden="true"
               />
               <span className="md:hidden">
-                {currentFile?.type === 's3'
+                {isEditableStorage
                   ? lastAutoSaveAt
                     ? formatTime(lastAutoSaveAt)
                     : '대기'
                   : '-'}
               </span>
               <span className="hidden md:inline">
-                자동저장(S3):{' '}
-                {currentFile?.type === 's3'
+                자동저장:{' '}
+                {isEditableStorage
                   ? lastAutoSaveAt
                     ? `마지막 ${formatTime(lastAutoSaveAt)}`
                     : '대기 중 (입력 후 5초)'
