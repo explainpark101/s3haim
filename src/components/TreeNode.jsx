@@ -10,10 +10,8 @@ import {
   IconVideo,
   IconFolder,
   IconTrash,
-  IconFilePlus,
-  IconFolderPlus,
 } from '@/components/icons';
-import { PencilIcon } from 'lucide-react';
+import { PencilIcon, ArrowRightToLine } from 'lucide-react';
 
 export default function TreeNode({
   node,
@@ -21,6 +19,7 @@ export default function TreeNode({
   onSelect,
   onCreateFile,
   onCreateFolder,
+  onRequestMoveFolder,
   onDelete,
   currentFileId,
   storageType,
@@ -280,41 +279,18 @@ export default function TreeNode({
         </div>
 
         <div className="opacity-100 flex items-center gap-1 shrink-0 transition-opacity">
-          {node.type === 'folder' && !isTrashRoot && (
-            <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isUnderDeletingFolder) return;
-                  const parentPath = node.path.endsWith('/') ? node.path : node.path + '/';
-                  if (storageType === 'local') {
-                    onCreateFile(parentPath, node.handle);
-                  } else {
-                    onCreateFile(parentPath);
-                  }
-                }}
-                className="p-1 rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-odp-focusBg"
-                title="이 폴더에 파일 추가"
-              >
-                <IconFilePlus size={12} />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isUnderDeletingFolder) return;
-                  const parentPath = node.path.endsWith('/') ? node.path : node.path + '/';
-                  if (storageType === 'local') {
-                    onCreateFolder(parentPath, node.handle);
-                  } else {
-                    onCreateFolder(parentPath);
-                  }
-                }}
-                className="p-1 rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-odp-focusBg"
-                title="이 폴더에 폴더 추가"
-              >
-                <IconFolderPlus size={12} />
-              </button>
-            </>
+          {node.type === 'folder' && !isTrashRoot && onRequestMoveFolder && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isUnderDeletingFolder) return;
+                onRequestMoveFolder(node, storageType);
+              }}
+              className="p-1 rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-odp-focusBg"
+              title="폴더 위치 이동"
+            >
+              <ArrowRightToLine size={12} />
+            </button>
           )}
           {node.type === 'file' && !isTrashRoot && (
             <button
@@ -354,6 +330,7 @@ export default function TreeNode({
             onSelect={onSelect}
             onCreateFile={onCreateFile}
             onCreateFolder={onCreateFolder}
+            onRequestMoveFolder={onRequestMoveFolder}
             onDelete={onDelete}
             currentFileId={currentFileId}
             storageType={storageType}

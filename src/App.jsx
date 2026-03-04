@@ -20,6 +20,7 @@ import { SetPasswordModal } from '@/components/modals/SetPasswordModal';
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
 import { MoveFileModal } from '@/components/modals/MoveFileModal';
+import { MoveFolderModal } from '@/components/modals/MoveFolderModal';
 import { CreateItemModal } from '@/components/modals/CreateItemModal';
 import SettingsPage from '@/pages/SettingsPage';
 
@@ -70,6 +71,7 @@ export default function App() {
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
   const [operationStatus, setOperationStatus] = useState('');
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [moveFolderTarget, setMoveFolderTarget] = useState(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createModalContext, setCreateModalContext] = useState(null);
   const [isCreateSubmitting, setIsCreateSubmitting] = useState(false);
@@ -656,6 +658,47 @@ export default function App() {
     };
   };
 
+  const moveS3FolderToFolder = async (folderNode, destPath) => {
+    const client = getS3Client();
+    if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+    const bucket = s3Creds.bucket;
+    const prefix = folderNode.path;
+    const contents = await listObjectsV2(client, bucket, prefix);
+    if (contents.length === 0) return;
+    const destPrefix = destPath || '';
+    for (const { Key } of contents) {
+      const relative = Key.slice(prefix.length);
+      const newKey = destPrefix + relative;
+      await copyObject(client, bucket, Key, newKey);
+    }
+    await deleteObjects(client, bucket, contents.map(({ Key }) => ({ Key })));
+    loadS3Files();
+  };
+
+  const moveLocalFolderToFolder = async (folderNode, destDirHandle, destDirPath) => {
+    const sourceDir = folderNode.parentHandle || localRootHandle;
+    if (!sourceDir) throw new Error('원본 폴더를 찾을 수 없습니다.');
+    if (!destDirHandle) throw new Error('대상 폴더를 찾을 수 없습니다.');
+    const newFolderHandle = await destDirHandle.getDirectoryHandle(folderNode.name, { create: true });
+    const copyDirRecursive = async (srcHandle, destHandle) => {
+      for await (const entry of srcHandle.values()) {
+        if (entry.kind === 'file') {
+          const file = await entry.getFile();
+          const newFileHandle = await destHandle.getFileHandle(entry.name, { create: true });
+          const writable = await newFileHandle.createWritable();
+          await writable.write(await file.arrayBuffer());
+          await writable.close();
+        } else if (entry.kind === 'directory') {
+          const newDirHandle = await destHandle.getDirectoryHandle(entry.name, { create: true });
+          await copyDirRecursive(entry, newDirHandle);
+        }
+      }
+    };
+    await copyDirRecursive(folderNode.handle, newFolderHandle);
+    await sourceDir.removeEntry(folderNode.name, { recursive: true });
+    await refreshLocalTree();
+  };
+
   const handleViewUnsupportedAsText = async () => {
     if (!currentFile || currentFile.viewer !== 'unsupported') return;
     if (currentFile.type === 's3') {
@@ -1109,6 +1152,30 @@ export default function App() {
     setIsMoveModalOpen(true);
   };
 
+  const handleRequestMoveFolder = (node, storageType) => {
+    if (!node || node.type !== 'folder') return;
+    setMoveFolderTarget({ node, storageType });
+  };
+
+  const handleConfirmMoveFolder = async (dest) => {
+    if (!moveFolderTarget || !dest) return;
+    const { node, storageType } = moveFolderTarget;
+    try {
+      if (storageType === 's3') {
+        await moveS3FolderToFolder(node, dest.path || '');
+      } else {
+        const destHandle = dest.handle || localRootHandle;
+        if (!destHandle) throw new Error('대상 폴더를 찾을 수 없습니다.');
+        await moveLocalFolderToFolder(node, destHandle, dest.path || '');
+      }
+      setMoveFolderTarget(null);
+      setOperationStatus(`폴더 이동 완료: ${node.name}`);
+    } catch (e) {
+      alert('폴더 이동 실패: ' + e.message);
+      setOperationStatus(`폴더 이동 실패: ${e.message}`);
+    }
+  };
+
   const handleConfirmMove = async (dest) => {
     if (!currentFile || !dest) return;
     try {
@@ -1299,6 +1366,7 @@ export default function App() {
                 currentFile={currentFile}
                 onSelectFile={selectFile}
                 onCreateItem={requestCreateItem}
+                onRequestMoveFolder={handleRequestMoveFolder}
                 onOpenLocalFolder={openLocalFolder}
                 onSetDeleteTarget={setDeleteTarget}
                 onOpenSettings={() => navigate('/settings')}
@@ -1508,6 +1576,18 @@ export default function App() {
         currentFile={currentFile}
         onClose={() => setIsMoveModalOpen(false)}
         onConfirm={handleConfirmMove}
+      />
+
+      {/* Move Folder Modal */}
+      <MoveFolderModal
+        isOpen={!!moveFolderTarget}
+        storageType={moveFolderTarget?.storageType}
+        s3Tree={s3Tree}
+        localTree={localTree}
+        localRootHandle={localRootHandle}
+        folderNode={moveFolderTarget?.node}
+        onClose={() => setMoveFolderTarget(null)}
+        onConfirm={handleConfirmMoveFolder}
       />
 
       {/* Create File/Folder Modal */}

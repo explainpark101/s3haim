@@ -18,6 +18,7 @@ export default function Sidebar({
   currentFile,
   onSelectFile,
   onCreateItem,
+  onRequestMoveFolder,
   onOpenLocalFolder,
   onSetDeleteTarget,
   onOpenSettings,
@@ -158,6 +159,7 @@ export default function Sidebar({
                     currentFileId={currentFile?.id}
                     onCreateFile={(p) => onCreateItem('s3', p, null, 'file')}
                     onCreateFolder={(p) => onCreateItem('s3', p, null, 'folder')}
+                    onRequestMoveFolder={onRequestMoveFolder}
                     onDelete={(n, t) => onSetDeleteTarget({ node: n, type: t })}
                     onRename={onRenameItem}
                     deletingFolderPath={deletingFolderPath}
@@ -236,6 +238,7 @@ export default function Sidebar({
                 currentFileId={currentFile?.id}
                 onCreateFile={(p, h) => onCreateItem('local', p, h, 'file')}
                 onCreateFolder={(p, h) => onCreateItem('local', p, h, 'folder')}
+                onRequestMoveFolder={onRequestMoveFolder}
                 onDelete={(n, t) => onSetDeleteTarget({ node: n, type: t })}
                 onRename={onRenameItem}
                 deletingFolderPath={deletingFolderPath}
