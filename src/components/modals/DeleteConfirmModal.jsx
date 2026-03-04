@@ -4,12 +4,20 @@ import Modal from '@/components/modals/Modal';
 
 const CLOSE_ANIMATION_MS = 200;
 
-export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing = false }) {
+export function DeleteConfirmModal({
+  target,
+  associatedRecordings = [],
+  onCancel,
+  onConfirm,
+  isProcessing = false,
+}) {
   const [displayTarget, setDisplayTarget] = useState(null);
+  const [deleteWithRecordings, setDeleteWithRecordings] = useState(true);
 
   useEffect(() => {
     if (target) {
       setDisplayTarget(target);
+      setDeleteWithRecordings(true);
     } else if (displayTarget) {
       const t = setTimeout(() => setDisplayTarget(null), CLOSE_ANIMATION_MS);
       return () => clearTimeout(t);
@@ -21,6 +29,11 @@ export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing =
   const data = target || displayTarget;
   const isInTrash = data.node.path?.startsWith('.trash/');
   const isTrashRoot = data.node.path === '.trash/';
+  const hasRecordings = associatedRecordings.length > 0;
+
+  const handleConfirm = () => {
+    onConfirm(hasRecordings ? { deleteWithRecordings } : {});
+  };
 
   return (
     <Modal isOpen={!!target}>
@@ -52,6 +65,22 @@ export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing =
             </>
           )}
         </p>
+        {hasRecordings && !isTrashRoot && (
+          <div className="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={deleteWithRecordings}
+                onChange={(e) => setDeleteWithRecordings(e.target.checked)}
+                className="mt-1 rounded border-amber-300"
+              />
+              <span className="text-sm text-amber-800 dark:text-amber-200">
+                이 파일과 연관된 녹음 {associatedRecordings.length}개도 함께{' '}
+                {isInTrash ? '영구 삭제' : '쓰레기통으로 이동'}합니다.
+              </span>
+            </label>
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
@@ -61,7 +90,7 @@ export function DeleteConfirmModal({ target, onCancel, onConfirm, isProcessing =
           </button>
           <button
             type="button"
-            onClick={isProcessing ? undefined : onConfirm}
+            onClick={isProcessing ? undefined : handleConfirm}
             disabled={isProcessing || !target}
             className={`px-4 py-2 text-sm font-medium text-white rounded transition ${
               isProcessing

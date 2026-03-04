@@ -2,6 +2,7 @@ import {
   S3Client,
   ListObjectsV2Command,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
@@ -59,6 +60,34 @@ export async function getObjectBody(client, bucket, key) {
     ContentLength: response.ContentLength,
     ContentType: response.ContentType,
   };
+}
+
+/**
+ * Get object metadata (LastModified 등) without downloading body.
+ * @param {S3Client} client
+ * @param {string} bucket
+ * @param {string} key
+ * @returns {Promise<{ LastModified?: Date, ContentLength?: number, ContentType?: string } | null>}
+ *   객체가 없으면 null
+ */
+export async function headObject(client, bucket, key) {
+  try {
+    const command = new HeadObjectCommand({ Bucket: bucket, Key: key });
+    const response = await client.send(command);
+    return {
+      LastModified: response.LastModified,
+      ContentLength: response.ContentLength,
+      ContentType: response.ContentType,
+    };
+  } catch (e) {
+    if (
+      e?.name === 'NotFound' ||
+      e?.Code === 'NoSuchKey' ||
+      e?.$metadata?.httpStatusCode === 404
+    )
+      return null;
+    throw e;
+  }
 }
 
 /**

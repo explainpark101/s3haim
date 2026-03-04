@@ -8,6 +8,7 @@ import {
   IconSettings,
   IconSun,
   IconMoon,
+  IconUpload,
 } from '@/components/icons';
 
 export default function Sidebar({
@@ -18,6 +19,7 @@ export default function Sidebar({
   currentFile,
   onSelectFile,
   onCreateItem,
+  onRequestUploadFile,
   onRequestMoveFolder,
   onOpenLocalFolder,
   onSetDeleteTarget,
@@ -127,6 +129,16 @@ export default function Sidebar({
               <button
                 onClick={() => {
                   const targetPath = lastFocusedS3FolderPath || '';
+                  onRequestUploadFile?.('s3', targetPath, null);
+                }}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
+                title="선택된 폴더에 파일 업로드"
+              >
+                <IconUpload size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
+              </button>
+              <button
+                onClick={() => {
+                  const targetPath = lastFocusedS3FolderPath || '';
                   onCreateItem('s3', targetPath, null, 'file');
                 }}
                 className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
@@ -188,6 +200,19 @@ export default function Sidebar({
             </span>
             {localRootHandle && (
               <div className="flex gap-1">
+                <button
+                  onClick={() => {
+                    const target =
+                      lastFocusedLocalFolder.path && lastFocusedLocalFolder.handle
+                        ? lastFocusedLocalFolder
+                        : { path: '', handle: localRootHandle };
+                    onRequestUploadFile?.('local', target.path, target.handle);
+                  }}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
+                  title="선택된 폴더에 파일 업로드"
+                >
+                  <IconUpload size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
+                </button>
                 <button
                   onClick={() => {
                     const target =

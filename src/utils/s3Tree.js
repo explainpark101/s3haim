@@ -68,6 +68,55 @@ export const getFileLastModifiedMap = (nodes) => {
 };
 
 /**
+ * Collect all file nodes from the tree.
+ * @param {Array} nodes
+ * @returns {{ path: string, lastModified?: Date }[]}
+ */
+const getAllFileNodes = (nodes) => {
+  const result = [];
+  const walk = (list) => {
+    if (!list) return;
+    for (const node of list) {
+      if (node.type === 'file' && node.path) {
+        result.push({ path: node.path, lastModified: node.lastModified });
+      }
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return result;
+};
+
+/**
+ * noteKey에 해당하는 녹음 파일 키 목록 (최신순)
+ * 패턴: {base}-rec-{timestamp}.m4a | .webm
+ * @param {Array} nodes - s3Tree
+ * @param {string} noteKey - 예: notes/회의록.md
+ * @returns {{ key: string, timestamp: number, lastModified?: Date }[]}
+ */
+export const getRecordingKeysFromTree = (nodes, noteKey) => {
+  const base = !noteKey || typeof noteKey !== 'string' ? '' : noteKey.replace(/\.[^.]+$/, '') || noteKey;
+  if (!base) return [];
+  const prefix = base + '-rec-';
+  const suffixRegex = /\.(m4a|webm)$/;
+  const files = getAllFileNodes(nodes);
+  const results = [];
+  for (const { path, lastModified } of files) {
+    if (!path.startsWith(prefix) || !suffixRegex.test(path)) continue;
+    const match = path.match(/-rec-(\d+)\.(m4a|webm)$/);
+    if (match) {
+      results.push({
+        key: path,
+        timestamp: parseInt(match[1], 10),
+        lastModified,
+      });
+    }
+  }
+  results.sort((a, b) => (b.timestamp - a.timestamp));
+  return results;
+};
+
+/**
  * Find a file node by path in the tree.
  * @param {Array} nodes
  * @param {string} path

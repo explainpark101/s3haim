@@ -13,7 +13,7 @@ import {
   disableWebAuthnUnlock,
   updateWebAuthnWrappedPassword,
 } from '@/utils/webauthn';
-import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath } from '@/utils/s3Tree';
+import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath, getRecordingKeysFromTree } from '@/utils/s3Tree';
 import {
   createS3Client,
   listObjectsV2,
@@ -37,6 +37,11 @@ import { MoveFileModal } from '@/components/modals/MoveFileModal';
 import { MoveFolderModal } from '@/components/modals/MoveFolderModal';
 import { CreateItemModal } from '@/components/modals/CreateItemModal';
 import SettingsPage from '@/pages/SettingsPage';
+import { useRecording } from '@/hooks/useRecording';
+import { runEncodeAndUploadPipeline, getSyncKeyForRecording } from '@/utils/recordingPipeline';
+import { decodeSyncData } from '@/utils/syncProto';
+import { savePendingUpload } from '@/utils/pendingUploadsDb';
+import { syncPendingUploads } from '@/utils/syncPendingUploads';
 
 export default function App() {
   const navigate = useNavigate();
@@ -75,6 +80,8 @@ export default function App() {
   const [showHiddenFolders, setShowHiddenFolders] = useState(false);
 
   const fileInputRef = useRef(null);
+  const uploadFileInputRef = useRef(null);
+  const [uploadTarget, setUploadTarget] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const sidebarResizeStateRef = useRef({
     isResizing: false,
@@ -83,6 +90,7 @@ export default function App() {
   });
   const [deletingFolderPath, setDeletingFolderPath] = useState(null);
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [operationStatus, setOperationStatus] = useState('');
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [webauthnPRFSupported, setWebauthnPRFSupported] = useState(false);
@@ -105,6 +113,20 @@ export default function App() {
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const {
+    isRecording,
+    audioLevel,
+    startRecording,
+    stopRecording,
+    captureSync,
+  } = useRecording();
+
+  const [recordingPipelineStatus, setRecordingPipelineStatus] = useState('');
+  const [recordingsList, setRecordingsList] = useState([]);
+  const [selectedRecordingKey, setSelectedRecordingKey] = useState(null);
+  const [recordingAudioUrl, setRecordingAudioUrl] = useState('');
+  const [recordingSyncData, setRecordingSyncData] = useState([]);
 
   const s3TreeRef = useRef([]);
   const currentFileRef = useRef(null);
@@ -462,8 +484,83 @@ export default function App() {
   }, [getS3Client, s3Creds]);
 
   useEffect(() => {
-    if (scriptsLoaded && isUnlocked && s3Creds.bucket) loadS3Files();
-  }, [scriptsLoaded, isUnlocked, s3Creds.bucket, loadS3Files]);
+    if (!scriptsLoaded || !isUnlocked || !s3Creds.bucket) return;
+    const run = async () => {
+      const client = getS3Client();
+      if (client) {
+        try {
+          const { synced } = await syncPendingUploads(client, s3Creds.bucket, setOperationStatus);
+          if (synced > 0) setOperationStatus(`대기 중이던 ${synced}개 파일 동기화 완료`);
+        } catch (e) {
+          console.error('Pending uploads sync failed:', e);
+        }
+      }
+      loadS3Files();
+    };
+    run();
+  }, [scriptsLoaded, isUnlocked, s3Creds.bucket, loadS3Files, getS3Client]);
+
+  // 녹음 목록 및 선택된 녹음 URL/sync 로드
+  useEffect(() => {
+    if (!currentFile || currentFile.type !== 's3' || currentFile.viewer !== 'markdown') {
+      setRecordingsList([]);
+      setSelectedRecordingKey(null);
+      setRecordingAudioUrl('');
+      setRecordingSyncData([]);
+      return;
+    }
+    const noteKey = currentFile.id;
+    const list = getRecordingKeysFromTree(s3Tree, noteKey);
+    setRecordingsList(list);
+    setSelectedRecordingKey(list.length > 0 ? list[0].key : null);
+  }, [currentFile?.id, currentFile?.type, currentFile?.viewer, s3Tree]);
+
+  useEffect(() => {
+    if (!selectedRecordingKey || !s3Creds.bucket) {
+      setRecordingAudioUrl('');
+      setRecordingSyncData([]);
+      return;
+    }
+    const client = getS3Client();
+    if (!client) return;
+
+    let revoked = false;
+    (async () => {
+      try {
+        const url = await getSignedGetUrl(client, s3Creds.bucket, selectedRecordingKey, 3600);
+        if (!revoked) setRecordingAudioUrl(url);
+      } catch {
+        if (!revoked) setRecordingAudioUrl('');
+      }
+    })();
+
+    const syncKey = getSyncKeyForRecording(selectedRecordingKey);
+    if (syncKey) {
+      (async () => {
+        try {
+          const { body } = await getObjectBody(client, s3Creds.bucket, syncKey);
+          const data = decodeSyncData(body);
+          if (!revoked && Array.isArray(data)) setRecordingSyncData(data);
+        } catch {
+          try {
+            const jsonKey = syncKey.replace(/\.sync\.pb$/, '.sync.json');
+            const { body } = await getObjectBody(client, s3Creds.bucket, jsonKey);
+            const json = new TextDecoder('utf-8').decode(body);
+            const data = JSON.parse(json);
+            if (!revoked && Array.isArray(data)) setRecordingSyncData(data);
+          } catch {
+            if (!revoked) setRecordingSyncData([]);
+          }
+        }
+      })();
+    }
+
+    return () => {
+      revoked = true;
+      setRecordingAudioUrl('');
+      setRecordingSyncData([]);
+    };
+  }, [selectedRecordingKey, s3Creds.bucket, getS3Client]);
 
   // Mobile: poll S3 every 30s and refresh if S3 has newer LastModified
   useEffect(() => {
@@ -947,8 +1044,28 @@ export default function App() {
     }
   };
 
+  const isAbortOrNetworkError = (e) => {
+    if (!e) return false;
+    const name = (e?.name || '').toLowerCase();
+    const msg = (e?.message || '').toLowerCase();
+    const code = e?.code || '';
+    return (
+      name === 'aborterror' ||
+      name === 'networkerror' ||
+      msg.includes('abort') ||
+      msg.includes('network') ||
+      msg.includes('fetch') ||
+      msg.includes('econnreset') ||
+      msg.includes('econnrefused') ||
+      msg.includes('timeout') ||
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT' ||
+      code === 'ENOTFOUND'
+    );
+  };
+
   const saveFile = async (fileOverride = null, options = {}) => {
-    const { skipSuffixCheck = false } = options;
+    const { skipSuffixCheck = false, lastInputAt: inputModifiedAt } = options;
     const fileToSave = fileOverride ?? currentFile;
     if (!fileToSave) return;
     if (!skipSuffixCheck && !fileOverride && hasSuffixChange()) {
@@ -988,7 +1105,22 @@ export default function App() {
       }
       setCurrentFile((prev) => (prev?.id === fileToSave.id ? { ...prev, content: editorContent } : prev));
     } catch (e) {
-      alert("저장 실패: " + e.message);
+      if (fileToSave.type === 's3' && isAbortOrNetworkError(e)) {
+        try {
+          await savePendingUpload({
+            key: fileToSave.id,
+            content: editorContent,
+            modifiedAt: inputModifiedAt ?? Date.now(),
+            contentType: viewer === 'json' ? 'application/json' : viewer === 'raw' ? 'text/plain' : 'text/markdown',
+          });
+          alert('업로드가 중단되었습니다. 연결이 복구되면 다시 로그인하면 자동으로 동기화됩니다.');
+        } catch (dbErr) {
+          console.error('저장 실패 및 IndexedDB 임시 저장 실패:', dbErr);
+          alert('저장 실패: ' + e.message);
+        }
+      } else {
+        alert('저장 실패: ' + e.message);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -1131,6 +1263,53 @@ export default function App() {
     setCreateModalOpen(true);
   };
 
+  const requestUploadFile = (storageType, parentPath, parentDirHandle) => {
+    setUploadTarget({ storageType, parentPath, parentDirHandle });
+    uploadFileInputRef.current.value = '';
+    uploadFileInputRef.current?.click();
+  };
+
+  const handleUploadFileSelect = async (e) => {
+    const files = e.target.files;
+    if (!files?.length || !uploadTarget) return;
+    const { storageType, parentPath, parentDirHandle } = uploadTarget;
+    setUploadTarget(null);
+
+    try {
+      if (storageType === 's3') {
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const key = parentPath + file.name;
+          const body = await file.arrayBuffer();
+          await putObject(client, {
+            Bucket: s3Creds.bucket,
+            Key: key,
+            Body: new Uint8Array(body),
+            ContentType: file.type || 'application/octet-stream',
+          });
+        }
+        loadS3Files();
+      } else if (storageType === 'local') {
+        const targetDirHandle = parentDirHandle || localRootHandle;
+        if (!targetDirHandle) throw new Error('루트 폴더를 먼저 열어주세요.');
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const newFileHandle = await targetDirHandle.getFileHandle(file.name, { create: true });
+          const writable = await newFileHandle.createWritable();
+          await writable.write(await file.arrayBuffer());
+          await writable.close();
+        }
+        refreshLocalTree();
+      }
+    } catch (err) {
+      alert('업로드 실패: ' + err.message);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   const handleCreateItemSubmit = async (nameInput) => {
     if (!createModalContext) return;
     const { storageType, parentPath, parentDirHandle, type } = createModalContext;
@@ -1199,7 +1378,13 @@ export default function App() {
     }
   };
 
-  const moveS3EntryToTrash = async (node) => {
+  const moveS3KeyToTrash = async (client, bucket, key) => {
+    const destKey = `.trash/${key}`;
+    await copyObject(client, bucket, key, destKey);
+    await deleteObject(client, bucket, key);
+  };
+
+  const moveS3EntryToTrash = async (node, additionalKeys = []) => {
     const client = getS3Client();
     if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
 
@@ -1224,35 +1409,57 @@ export default function App() {
         await deleteObjects(client, bucket, contents.map(({ Key }) => ({ Key })));
       }
     }
+    for (const key of additionalKeys) {
+      try {
+        await moveS3KeyToTrash(client, bucket, key);
+      } catch (e) {
+        if (e?.$metadata?.httpStatusCode !== 404) throw e;
+      }
+    }
   };
 
-  const confirmDelete = async () => {
+  const associatedRecordings = (() => {
+    if (!deleteTarget || deleteTarget.type !== 's3' || deleteTarget.node.type !== 'file') return [];
+    return getRecordingKeysFromTree(s3Tree, deleteTarget.node.path);
+  })();
+
+  const confirmDelete = async (options = {}) => {
     if (!deleteTarget) return;
     const { node, type } = deleteTarget;
+    const { deleteWithRecordings = false } = options;
     const isInTrash = node.path.startsWith('.trash/');
     const isFolder = node.type === 'folder';
     const isTrashRoot = node.path === '.trash/';
 
     const closeModal = () => setDeleteTarget(null);
-    const closeTimer = setTimeout(closeModal, 3000);
+    let closeTimer = null;
+
+    const recordingKeysToMove = deleteWithRecordings
+      ? associatedRecordings.flatMap((r) => {
+          const syncKey = getSyncKeyForRecording(r.key);
+          return syncKey ? [r.key, syncKey] : [r.key];
+        })
+      : [];
 
     // 쓰레기통 루트는 실제 삭제 수행하지 않음
     if (isTrashRoot) {
       setOperationStatus('쓰레기통 비우기 요청: 실제 파일은 삭제되지 않습니다.');
-      clearTimeout(closeTimer);
       closeModal();
       return;
     }
 
+    if (isFolder && isDeletingFolder) return;
+
+    setIsDeleting(true);
     if (isFolder) {
-      if (isDeletingFolder) {
-        clearTimeout(closeTimer);
-        return;
-      }
       setIsDeletingFolder(true);
       setDeletingFolderPath(node.path);
       setOperationStatus(`폴더 삭제 중: ${node.path}`);
+    } else {
+      setOperationStatus(isInTrash ? `영구 삭제 중: ${node.path}` : `삭제 중: ${node.path}`);
     }
+
+    closeTimer = setTimeout(closeModal, 3000);
 
     try {
       if (type === 's3') {
@@ -1266,10 +1473,14 @@ export default function App() {
               await deleteObjects(client, s3Creds.bucket, contents.map(({ Key }) => ({ Key })));
             }
           } else {
-            await deleteObject(client, s3Creds.bucket, node.path);
+            const keysToDelete =
+              deleteWithRecordings && recordingKeysToMove.length > 0
+                ? [node.path, ...recordingKeysToMove]
+                : [node.path];
+            await deleteObjects(client, s3Creds.bucket, keysToDelete.map((Key) => ({ Key })));
           }
         } else {
-          await moveS3EntryToTrash(node);
+          await moveS3EntryToTrash(node, recordingKeysToMove);
         }
         loadS3Files();
       } else if (type === 'local') {
@@ -1454,7 +1665,7 @@ export default function App() {
       if (currentFile.content === editorContent) return;
       if (!currentFile || (currentFile.type !== 's3' && currentFile.type !== 'local')) return;
       try {
-        await saveFile();
+        await saveFile(null, { lastInputAt });
         setLastAutoSaveAt(now);
       } catch (e) {
         // saveFile 내부에서 alert 처리
@@ -1501,17 +1712,64 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFile, editorContent, lastInputAt]);
 
-  if (!scriptsLoaded) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500 dark:bg-odp-bgSofter dark:text-odp-fg">
-        로딩 중...
-      </div>
-    );
-  }
+  const prevEditorContentRef = useRef('');
+
+  useEffect(() => {
+    if (currentFile?.id) prevEditorContentRef.current = editorContent;
+  }, [currentFile?.id]);
 
   const handleEditorChange = (value) => {
+    if (isRecording && currentFile?.viewer === 'markdown') {
+      const prevLines = prevEditorContentRef.current.split('\n');
+      const newLines = value.split('\n');
+      const lineCountDiff = newLines.length - prevLines.length;
+      let line = Math.max(0, newLines.length - 1);
+      const maxLen = Math.max(prevLines.length, newLines.length);
+      for (let i = 0; i < maxLen; i++) {
+        if ((prevLines[i] ?? null) !== (newLines[i] ?? null)) {
+          line = i;
+          break;
+        }
+      }
+      const text = newLines[line] ?? '';
+      const isNewLineInserted = lineCountDiff === 1;
+      captureSync(line, text, { insert: isNewLineInserted });
+    }
+    prevEditorContentRef.current = value;
     setEditorContent(value);
     setLastInputAt(Date.now());
+  };
+
+  const handleToggleRecording = async () => {
+    if (isRecording) {
+      const noteKey = currentFile?.type === 's3' ? currentFile.id : '';
+      const result = await stopRecording({
+        noteKey,
+        markdown: editorContent,
+      });
+      if (result && currentFile?.type === 's3' && noteKey) {
+        const client = getS3Client();
+        if (client && s3Creds.bucket) {
+          try {
+            setRecordingPipelineStatus('업로드 중');
+            await runEncodeAndUploadPipeline({
+              recording: result,
+              client,
+              bucket: s3Creds.bucket,
+              recordId: result.id ?? undefined,
+              onStatus: setRecordingPipelineStatus,
+            });
+            loadS3Files();
+          } catch (e) {
+            alert('녹음 업로드 실패: ' + (e?.message || e));
+          } finally {
+            setRecordingPipelineStatus('');
+          }
+        }
+      }
+    } else {
+      await startRecording();
+    }
   };
 
   const formatTime = (ts) => {
@@ -1548,10 +1806,27 @@ export default function App() {
     ? 'bg-green-500'
     : 'bg-gray-400';
 
+  if (!scriptsLoaded) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500 dark:bg-odp-bgSofter dark:text-odp-fg">
+        로딩 중...
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-odp-bgSofter text-gray-800 dark:text-odp-fg font-sans relative">
       {/* Hidden file input for import */}
       <input type="file" ref={fileInputRef} onChange={handleImportCreds} accept=".json" className="hidden" />
+
+      {/* Hidden file input for upload */}
+      <input
+        type="file"
+        ref={uploadFileInputRef}
+        onChange={handleUploadFileSelect}
+        multiple
+        className="hidden"
+      />
 
       {/* Auth Modal (Lock Screen) */}
       <AuthModal
@@ -1616,6 +1891,7 @@ export default function App() {
                 currentFile={currentFile}
                 onSelectFile={selectFile}
                 onCreateItem={requestCreateItem}
+                onRequestUploadFile={requestUploadFile}
                 onRequestMoveFolder={handleRequestMoveFolder}
                 onOpenLocalFolder={openLocalFolder}
                 onSetDeleteTarget={setDeleteTarget}
@@ -1697,6 +1973,15 @@ export default function App() {
                   onDownloadCurrentFile={handleDownloadCurrentFile}
                   theme={theme}
                   previewOnly={isMobile}
+                  isRecording={isRecording}
+                  audioLevel={audioLevel}
+                  onToggleRecording={handleToggleRecording}
+                  recordingPipelineStatus={recordingPipelineStatus}
+                  recordingsList={recordingsList}
+                  selectedRecordingKey={selectedRecordingKey}
+                  onSelectRecording={setSelectedRecordingKey}
+                  recordingAudioUrl={recordingAudioUrl}
+                  recordingSyncData={recordingSyncData}
                   onRequestDelete={() =>
                     setDeleteTarget({
                       node: {
@@ -1734,6 +2019,15 @@ export default function App() {
                   onDownloadCurrentFile={handleDownloadCurrentFile}
                   theme={theme}
                   previewOnly={isMobile}
+                  isRecording={isRecording}
+                  audioLevel={audioLevel}
+                  onToggleRecording={handleToggleRecording}
+                  recordingPipelineStatus={recordingPipelineStatus}
+                  recordingsList={recordingsList}
+                  selectedRecordingKey={selectedRecordingKey}
+                  onSelectRecording={setSelectedRecordingKey}
+                  recordingAudioUrl={recordingAudioUrl}
+                  recordingSyncData={recordingSyncData}
                   onRequestDelete={() =>
                     setDeleteTarget(
                       currentFile
@@ -1884,6 +2178,7 @@ export default function App() {
       {/* Delete Modal */}
       <DeleteConfirmModal
         target={deleteTarget}
+        associatedRecordings={associatedRecordings}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
         isProcessing={isDeletingFolder && deleteTarget?.node?.type === 'folder'}

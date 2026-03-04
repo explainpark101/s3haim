@@ -25,6 +25,11 @@ import {
   Music2,
   Menu,
   X,
+  Mic,
+  Square,
+  Play,
+  Pause,
+  Eye,
 } from 'lucide-react';
 
 export const IconFolder = ({ size = 16, ...props }) => <Folder size={size} {...props} />;
@@ -53,3 +58,8 @@ export const IconRefresh = ({ size = 14, ...props }) => <RotateCw size={size} {.
 export const IconMusic = ({ size = 14, ...props }) => <Music2 size={size} {...props} />;
 export const IconMenu = ({ size = 20, ...props }) => <Menu size={size} {...props} />;
 export const IconX = ({ size = 20, ...props }) => <X size={size} {...props} />;
+export const IconMic = ({ size = 16, ...props }) => <Mic size={size} {...props} />;
+export const IconSquare = ({ size = 16, ...props }) => <Square size={size} {...props} />;
+export const IconPlay = ({ size = 16, ...props }) => <Play size={size} {...props} />;
+export const IconPause = ({ size = 16, ...props }) => <Pause size={size} {...props} />;
+export const IconEye = ({ size = 16, ...props }) => <Eye size={size} {...props} />;

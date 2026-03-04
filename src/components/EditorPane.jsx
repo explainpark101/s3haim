@@ -7,8 +7,13 @@ import {
   IconRefresh,
   IconSave,
   IconTrash,
+  IconEye,
 } from '@/components/icons';
+import AudioLevelIndicator from '@/components/AudioLevelIndicator';
+import RecordingDropdownButton from '@/components/RecordingDropdownButton';
 import MarkdownEditor from '@/components/MarkdownEditor';
+import RecordingSyncView from '@/components/RecordingSyncView';
+import RecordingPlayer from '@/components/RecordingPlayer';
 import MonacoTextEditor from '@/components/MonacoTextEditor';
 import Button from '@/components/Button';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
@@ -31,9 +36,31 @@ export default function EditorPane({
   onDownloadCurrentFile,
   theme = 'light',
   previewOnly = false,
+  isRecording = false,
+  audioLevel = 0,
+  onToggleRecording,
+  recordingPipelineStatus = '',
+  recordingsList = [],
+  selectedRecordingKey = null,
+  onSelectRecording,
+  recordingAudioUrl = '',
+  recordingSyncData = [],
 }) {
   const [pdfIframeKey, setPdfIframeKey] = useState(0);
   const pdfIframeRef = useRef(null);
+  const [recordingViewMode, setRecordingViewMode] = useState(false);
+  const [showRecordingToolbar, setShowRecordingToolbar] = useState(false);
+  const recordingAudioRef = useRef(null);
+
+  const formatRecordingLabel = (r) => {
+    const d = new Date(r.timestamp);
+    return d.toLocaleString('ko-KR', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   const getExt = (fileName) => {
     if (!fileName || typeof fileName !== 'string') return '';
@@ -90,7 +117,13 @@ export default function EditorPane({
     <div className="flex-1 flex flex-col min-w-0 max-h-full">
       <div className="h-14 border-b border-gray-200 dark:border-odp-bgSofter bg-white dark:bg-odp-surface flex items-center justify-between px-6 shrink-0 w-full gap-2">
         <div className="flex items-center gap-3 text-gray-700 dark:text-odp-fgStrong font-medium min-w-0 w-full">
-          {currentFile.type === 's3' ? <IconCloud /> : <IconFolder />}
+          {isRecording ? (
+            <AudioLevelIndicator level={audioLevel} size={16} />
+          ) : currentFile.type === 's3' ? (
+            <IconCloud />
+          ) : (
+            <IconFolder />
+          )}
           <div className="flex items-baseline min-w-0 flex-1 gap-1">
             {hasUnsavedChanges && <span className="text-red-500 text-xl leading-none shrink-0">*</span>}
             <input
@@ -103,6 +136,17 @@ export default function EditorPane({
           </div>
         </div>
         <div className="flex items-center gap-2 justify-end shrink-0">
+          {typeof onToggleRecording === 'function' && (
+            <RecordingDropdownButton
+              isRecording={isRecording}
+              audioLevel={audioLevel}
+              hasRecordings={recordingsList.length > 0}
+              recordingPipelineStatus={recordingPipelineStatus}
+              onStartRecording={onToggleRecording}
+              onStopRecording={onToggleRecording}
+              onShowToolbar={() => setShowRecordingToolbar(true)}
+            />
+          )}
           {viewer === 'pdf' && (
             <Button
               type="button"
@@ -120,10 +164,10 @@ export default function EditorPane({
             variant="secondary"
             size="sm"
             onClick={onRequestMove}
-            title="폴더로 이동"
+            title="파일 이동"
           >
             <IconFolder size={14} />
-            <span className="hidden md:inline"> 폴더로 이동</span>
+            <span className="hidden md:inline"> 파일 이동</span>
           </Button>
           <Button
             type="button"
@@ -160,15 +204,71 @@ export default function EditorPane({
           )}
         </div>
       </div>
-      <div className="flex-1 flex overflow-hidden bg-white dark:bg-odp-surface h-full">
+      <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-odp-surface h-full">
         {viewer === 'markdown' ? (
-          <MarkdownEditor
-            value={editorContent}
-            onChange={onChangeEditor}
-            onSave={onSave}
-            theme={theme}
-            previewOnly={previewOnly}
-          />
+          <>
+            {showRecordingToolbar && recordingsList.length > 0 && (
+              <div className="shrink-0 px-4 py-2 border-b border-gray-200 dark:border-odp-borderSoft bg-gray-50 dark:bg-odp-bgSoft flex flex-wrap items-center gap-2 w-full">
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-gray-700 dark:hover:text-odp-fgStrong p-1 shrink-0"
+                  onClick={() => {
+                    setShowRecordingToolbar(false);
+                    setRecordingViewMode(false);
+                  }}
+                  title="툴바 닫기"
+                  aria-label="녹음 툴바 닫기"
+                >
+                  <X size={16} />
+                </button>
+                <select
+                  className="text-sm rounded border border-gray-300 dark:border-odp-borderSoft bg-white dark:bg-odp-bgSoft px-2 py-1 shrink-0"
+                  value={selectedRecordingKey ?? ''}
+                  onChange={(e) => onSelectRecording?.(e.target.value || null)}
+                >
+                  {recordingsList.map((r) => (
+                    <option key={r.key} value={r.key}>
+                      {formatRecordingLabel(r)}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant={recordingViewMode ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => setRecordingViewMode((v) => !v)}
+                  title={recordingViewMode ? '편집 모드' : '녹음 동기화 보기'}
+                  className="shrink-0"
+                >
+                  <IconEye size={14} />
+                  <span className="hidden md:inline">
+                    {recordingViewMode ? '편집' : '동기화 보기'}
+                  </span>
+                </Button>
+                {recordingViewMode && recordingAudioUrl && (
+                  <RecordingPlayer audioUrl={recordingAudioUrl} audioRef={recordingAudioRef} />
+                )}
+              </div>
+            )}
+            <div className="flex-1 min-h-0">
+              {recordingViewMode && recordingAudioUrl ? (
+                <RecordingSyncView
+                  content={editorContent}
+                  syncData={recordingSyncData}
+                  audioRef={recordingAudioRef}
+                  theme={theme}
+                />
+              ) : (
+                <MarkdownEditor
+                  value={editorContent}
+                  onChange={onChangeEditor}
+                  onSave={onSave}
+                  theme={theme}
+                  previewOnly={previewOnly}
+                />
+              )}
+            </div>
+          </>
         ) : viewer === 'image' && currentFile.objectUrl ? (
           <div className="flex-1 flex items-center justify-center overflow-auto p-4">
             <img
