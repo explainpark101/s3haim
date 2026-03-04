@@ -14,6 +14,7 @@
     "@aws-sdk/core": "^3.973.16",
     "@aws-sdk/s3-request-presigner": "^3.1001.0",
     "@monaco-editor/react": "^4.7.0",
+    "@simplewebauthn/browser": "^13.2.2",
     "@tailwindcss/vite": "^4.2.1",
     "@vavt/cm-extension": "^1.11.2",
     "@vavt/v3-extension": "^4.0.0",

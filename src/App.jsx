@@ -2,6 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, useNavigate } from 'react-router';
 import { IconFile, IconMenu, IconX } from '@/components/icons';
 import { encryptData, decryptData } from '@/utils/crypto';
+import {
+  isWebAuthnPRFSupported,
+  getStoredWebAuthn,
+  unlockWithWebAuthn,
+  enableWebAuthnUnlock,
+  disableWebAuthnUnlock,
+  updateWebAuthnWrappedPassword,
+} from '@/utils/webauthn';
 import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath } from '@/utils/s3Tree';
 import {
   createS3Client,
@@ -71,6 +79,7 @@ export default function App() {
   const [isDeletingFolder, setIsDeletingFolder] = useState(false);
   const [operationStatus, setOperationStatus] = useState('');
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [webauthnPRFSupported, setWebauthnPRFSupported] = useState(false);
   const [moveFolderTarget, setMoveFolderTarget] = useState(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createModalContext, setCreateModalContext] = useState(null);
@@ -165,6 +174,10 @@ export default function App() {
     checkStoredCredentials();
   }, []);
 
+  useEffect(() => {
+    isWebAuthnPRFSupported().then(setWebauthnPRFSupported);
+  }, []);
+
   const checkStoredCredentials = () => {
     const stored = localStorage.getItem('s3NotesEncrypted');
     if (stored) {
@@ -201,6 +214,13 @@ export default function App() {
       setS3Creds(creds);
       setMasterPassword(password);
       setShowSetPasswordModal(false);
+      if (getStoredWebAuthn()) {
+        try {
+          await updateWebAuthnWrappedPassword(password);
+        } catch {
+          // WebAuthn 래핑 갱신 실패 시에도 저장은 완료된 상태로 둠
+        }
+      }
       loadS3Files(creds);
       navigate('/');
     } catch (e) {
@@ -1315,7 +1335,13 @@ export default function App() {
       <input type="file" ref={fileInputRef} onChange={handleImportCreds} accept=".json" className="hidden" />
 
       {/* Auth Modal (Lock Screen) */}
-      <AuthModal isOpen={showAuthModal} onUnlock={handleUnlock} fileInputRef={fileInputRef} />
+      <AuthModal
+        isOpen={showAuthModal}
+        onUnlock={handleUnlock}
+        fileInputRef={fileInputRef}
+        canUnlockWithWebAuthn={webauthnPRFSupported && !!getStoredWebAuthn()}
+        onUnlockWithWebAuthn={unlockWithWebAuthn}
+      />
 
       {/* Main UI (Blurred if locked) */}
       <div
@@ -1420,6 +1446,10 @@ export default function App() {
                     setShowHiddenFolders((prev) => !prev)
                   }
                   onClose={handleSettingsClose}
+                  webauthnSupported={webauthnPRFSupported}
+                  webauthnEnabled={!!getStoredWebAuthn()}
+                  onEnableWebAuthn={enableWebAuthnUnlock}
+                  onDisableWebAuthn={disableWebAuthnUnlock}
                 />
               }
             />

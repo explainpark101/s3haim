@@ -10,8 +10,13 @@ export default function SettingsPage({
   showHiddenFolders,
   onToggleHiddenFolders,
   onClose,
+  webauthnSupported = false,
+  webauthnEnabled = false,
+  onEnableWebAuthn,
+  onDisableWebAuthn,
 }) {
   const [formCreds, setFormCreds] = useState(s3Creds);
+  const [webauthnLoading, setWebauthnLoading] = useState(false);
 
   useEffect(() => {
     setFormCreds(s3Creds);
@@ -140,6 +145,42 @@ export default function SettingsPage({
             </button>
           </div>
         </div>
+
+        {/* WebAuthn: 지문/보안 키로 잠금 해제 */}
+        {webauthnSupported && masterPassword && (
+          <div className="bg-gray-50 dark:bg-odp-surface p-4 rounded-lg border border-gray-200 dark:border-odp-borderStrong">
+            <h3 className="text-sm font-bold text-gray-700 dark:text-odp-fgStrong mb-2">지문 / 보안 키로 잠금 해제</h3>
+            <p className="text-xs text-gray-600 dark:text-odp-muted mb-2">
+              지문, Windows Hello, Touch ID 등으로 앱 잠금 해제를 사용할 수 있습니다. JSON 내보내기 시에는 비밀번호를 사용합니다.
+            </p>
+            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-odp-fg">
+              <input
+                type="checkbox"
+                checked={webauthnEnabled}
+                disabled={webauthnLoading}
+                onChange={async (e) => {
+                  if (webauthnLoading) return;
+                  if (e.target.checked) {
+                    setWebauthnLoading(true);
+                    try {
+                      await onEnableWebAuthn?.(masterPassword);
+                    } catch (err) {
+                      alert(err?.message || '보안 키 등록에 실패했습니다.');
+                      e.target.checked = false;
+                    } finally {
+                      setWebauthnLoading(false);
+                    }
+                  } else {
+                    onDisableWebAuthn?.();
+                  }
+                }}
+                className="w-3 h-3 accent-blue-500"
+              />
+              <span>{webauthnEnabled ? '사용 중' : '지문/보안 키로 잠금 해제 사용'}</span>
+              {webauthnLoading && <span className="text-gray-400">등록 중…</span>}
+            </label>
+          </div>
+        )}
 
         {/* Hidden Folders Option */}
         <div className="bg-gray-50 dark:bg-odp-surface p-4 rounded-lg border border-gray-200 dark:border-odp-borderStrong">
