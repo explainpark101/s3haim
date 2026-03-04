@@ -167,40 +167,48 @@ export default function TreeNode({
   const handleRenameStart = (e) => {
     e.stopPropagation();
     if (isUnderDeletingFolder) return;
-    if (node.type !== 'file') return;
-    setTempName(baseName);
+    if (node.type === 'file') {
+      setTempName(baseName);
+    } else if (node.type === 'folder') {
+      setTempName(node.name);
+    } else return;
     setIsRenaming(true);
   };
 
   const commitRename = () => {
-    if (node.type !== 'file' || isUnderDeletingFolder) {
+    if (isUnderDeletingFolder) {
       setIsRenaming(false);
       return;
     }
     const trimmed = tempName.trim();
-    const originalBase = baseName;
-
     if (!trimmed) {
-      setTempName(originalBase);
+      setTempName(node.type === 'file' ? baseName : node.name);
       setIsRenaming(false);
       return;
     }
-
     if (trimmed.includes('/')) {
-      alert("파일 이름에는 '/' 문자를 사용할 수 없습니다.");
-      setTempName(originalBase);
+      alert(node.type === 'folder' ? "폴더 이름에는 '/' 문자를 사용할 수 없습니다." : "파일 이름에는 '/' 문자를 사용할 수 없습니다.");
+      setTempName(node.type === 'file' ? baseName : node.name);
       setIsRenaming(false);
       return;
     }
 
-    if (trimmed === originalBase) {
-      setIsRenaming(false);
-      return;
-    }
-
-    const newTitle = trimmed; // extension은 고정, 상위에서 붙임
-    if (typeof onRename === 'function') {
-      onRename(storageType, node, newTitle);
+    if (node.type === 'file') {
+      if (trimmed === baseName) {
+        setIsRenaming(false);
+        return;
+      }
+      if (typeof onRename === 'function') {
+        onRename(storageType, node, trimmed);
+      }
+    } else if (node.type === 'folder') {
+      if (trimmed === node.name) {
+        setIsRenaming(false);
+        return;
+      }
+      if (typeof onRename === 'function') {
+        onRename(storageType, node, trimmed);
+      }
     }
     setIsRenaming(false);
   };
@@ -213,7 +221,7 @@ export default function TreeNode({
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      setTempName(baseName);
+      setTempName(node.type === 'file' ? baseName : node.name);
       setIsRenaming(false);
     }
   };
@@ -245,7 +253,7 @@ export default function TreeNode({
                 : <IconFolder />
               : <FileIconComponent />}
           </span>
-          {isRenaming && node.type === 'file' && !isTrashRoot ? (
+          {isRenaming && !isTrashRoot && (node.type === 'file' || node.type === 'folder') ? (
             <span className="flex items-baseline gap-1 min-w-0">
               <input
                 className="bg-transparent border-none outline-none text-sm font-medium truncate placeholder:text-gray-400 dark:placeholder:text-gray-500"
@@ -255,9 +263,9 @@ export default function TreeNode({
                 onKeyDown={handleRenameKeyDown}
                 onClick={(e) => e.stopPropagation()}
                 autoFocus
-                placeholder={baseName || '이름 없음'}
+                placeholder={node.type === 'file' ? (baseName || '이름 없음') : (node.name || '폴더명')}
               />
-              {extension && (
+              {node.type === 'file' && extension && (
                 <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
                   {extension}
                 </span>
@@ -297,6 +305,15 @@ export default function TreeNode({
               onClick={handleRenameStart}
               className="px-2 py-1 text-[11px] rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-odp-focusBg"
               title="파일명 수정"
+            >
+              <PencilIcon className="size-3.5" />
+            </button>
+          )}
+          {node.type === 'folder' && !isTrashRoot && (
+            <button
+              onClick={handleRenameStart}
+              className="p-1 rounded text-gray-500 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-odp-focusBg"
+              title="폴더명 수정"
             >
               <PencilIcon className="size-3.5" />
             </button>

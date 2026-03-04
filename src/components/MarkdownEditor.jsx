@@ -37,7 +37,7 @@ export default function MarkdownEditor({ value, onChange, onSave, theme = 'light
   }, [onSave]);
 
   return (
-    <div ref={containerRef} className="h-full flex flex-col">
+    <div ref={containerRef} className="h-full w-full flex flex-col">
       <MdEditor
         ref={editorRef}
         modelValue={value}

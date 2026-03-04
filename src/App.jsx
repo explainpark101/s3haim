@@ -872,11 +872,12 @@ export default function App() {
     loadS3Files();
   };
 
-  const moveLocalFolderToFolder = async (folderNode, destDirHandle, destDirPath) => {
+  const moveLocalFolderToFolder = async (folderNode, destDirHandle, destDirPath, newFolderName) => {
     const sourceDir = folderNode.parentHandle || localRootHandle;
     if (!sourceDir) throw new Error('원본 폴더를 찾을 수 없습니다.');
     if (!destDirHandle) throw new Error('대상 폴더를 찾을 수 없습니다.');
-    const newFolderHandle = await destDirHandle.getDirectoryHandle(folderNode.name, { create: true });
+    const nameToUse = newFolderName != null ? newFolderName : folderNode.name;
+    const newFolderHandle = await destDirHandle.getDirectoryHandle(nameToUse, { create: true });
     const copyDirRecursive = async (srcHandle, destHandle) => {
       for await (const entry of srcHandle.values()) {
         if (entry.kind === 'file') {
@@ -1310,6 +1311,31 @@ export default function App() {
     const trimmed = newTitle.trim();
     if (!trimmed) return;
     try {
+      if (node.type === 'folder') {
+        if (storageType === 's3') {
+          const prefix = node.path;
+          const parentPath = prefix.slice(0, prefix.length - (node.name?.length ?? 0) - 1);
+          const destPrefix = `${parentPath}${trimmed}/`;
+          await moveS3FolderToFolder(node, destPrefix);
+          loadS3Files();
+          if (currentFile && currentFile.type === 's3' && currentFile.id.startsWith(node.path)) {
+            const newPath = currentFile.id.replace(prefix, destPrefix);
+            setCurrentFile((prev) => (prev && prev.type === 's3' ? { ...prev, id: newPath } : prev));
+          }
+        } else if (storageType === 'local') {
+          const parentHandle = node.parentHandle || localRootHandle;
+          if (!parentHandle) throw new Error('루트 폴더를 먼저 열어주세요.');
+          await moveLocalFolderToFolder(node, parentHandle, '', trimmed);
+          if (currentFile && currentFile.type === 'local' && (currentFile.id === node.path || currentFile.id.startsWith(node.path))) {
+            const newPath = node.path.slice(0, -(node.name?.length ?? 0) - 1) + trimmed + '/';
+            const newPathForFile = currentFile.id.startsWith(node.path)
+              ? newPath + currentFile.id.slice(node.path.length)
+              : currentFile.id;
+            setCurrentFile((prev) => (prev && prev.type === 'local' ? { ...prev, id: newPathForFile } : prev));
+          }
+        }
+        return;
+      }
       if (storageType === 's3') {
         const originalName = node.name || '';
         const lastDot = originalName.lastIndexOf('.');
