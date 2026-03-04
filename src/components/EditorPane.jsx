@@ -9,6 +9,7 @@ import {
   IconTrash,
 } from '@/components/icons';
 import MarkdownEditor from '@/components/MarkdownEditor';
+import MonacoTextEditor from '@/components/MonacoTextEditor';
 import Button from '@/components/Button';
 import { ConfirmModal } from '@/components/modals/ConfirmModal';
 
@@ -53,7 +54,8 @@ export default function EditorPane({
   }
 
   const viewer = currentFile.viewer || 'markdown';
-  const hasUnsavedChanges = viewer === 'markdown' && currentFile.content !== editorContent;
+  const isEditableViewer = viewer === 'markdown' || viewer === 'json' || viewer === 'raw';
+  const hasUnsavedChanges = isEditableViewer && currentFile.content !== editorContent;
 
   const name = currentFile.name || '';
   const lastDot = name.lastIndexOf('.');
@@ -226,7 +228,7 @@ export default function EditorPane({
             variant="primary"
             size="sm"
             onClick={onSave}
-            disabled={isSaving || viewer !== 'markdown'}
+            disabled={isSaving || !isEditableViewer}
             title={isSaving ? '저장 중...' : '저장'}
           >
             <IconSave />
@@ -262,12 +264,14 @@ export default function EditorPane({
             />
           </div>
         ) : viewer === 'json' ? (
-          <div className="flex-1 flex flex-col overflow-hidden p-4">
-            <textarea
-              readOnly
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0 p-4">
+            <MonacoTextEditor
               value={editorContent}
-              className="flex-1 w-full min-h-0 p-3 font-mono text-sm rounded border border-gray-200 dark:border-odp-borderSoft bg-gray-50 dark:bg-odp-bgSoft text-gray-800 dark:text-odp-fg resize-none outline-none"
-              spellCheck={false}
+              language="json"
+              theme={theme}
+              readOnly={false}
+              onChange={onChangeEditor}
+              onSave={onSave}
             />
           </div>
         ) : viewer === 'audio' && currentFile.objectUrl ? (
@@ -287,12 +291,14 @@ export default function EditorPane({
             />
           </div>
         ) : viewer === 'raw' ? (
-          <div className="flex-1 flex flex-col overflow-hidden p-4">
-            <textarea
-              readOnly
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0 p-4">
+            <MonacoTextEditor
               value={editorContent}
-              className="flex-1 w-full min-h-0 p-3 font-mono text-sm rounded border border-gray-200 dark:border-odp-borderSoft bg-gray-50 dark:bg-odp-bgSoft text-gray-800 dark:text-odp-fg resize-none outline-none"
-              spellCheck={false}
+              language="plaintext"
+              theme={theme}
+              readOnly={false}
+              onChange={onChangeEditor}
+              onSave={onSave}
             />
           </div>
         ) : viewer === 'unsupported' ? (

@@ -136,13 +136,13 @@ export default function SettingsPage({
               onClick={onExportCreds}
               className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 text-xs font-semibold py-2 rounded transition"
             >
-              <IconDownload /> 내보내기 (.json)
+              <IconDownload /> S3 연결정보 내보내기
             </button>
             <button
               onClick={onImportClick}
               className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 text-xs font-semibold py-2 rounded transition"
             >
-              <IconUpload /> 불러오기
+              <IconUpload /> S3 연결정보 불러오기
             </button>
           </div>
         </div>

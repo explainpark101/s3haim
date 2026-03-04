@@ -299,7 +299,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `s3-notes-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `s3-haim-creds-${new Date().toISOString()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       setShowExportPasswordModal(false);
@@ -870,16 +870,21 @@ export default function App() {
 
   const saveFile = async () => {
     if (!currentFile) return;
+    const viewer = currentFile.viewer || 'markdown';
+    const editableViewers = ['markdown', 'json', 'raw'];
+    if (!editableViewers.includes(viewer)) return;
     setIsSaving(true);
     try {
       if (currentFile.type === 's3') {
         const client = getS3Client();
         if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        const contentType =
+          viewer === 'json' ? 'application/json' : viewer === 'raw' ? 'text/plain' : 'text/markdown';
         await putObject(client, {
           Bucket: s3Creds.bucket,
           Key: currentFile.id,
           Body: editorContent,
-          ContentType: 'text/markdown',
+          ContentType: contentType,
         });
         loadS3Files();
       } else if (currentFile.type === 'local') {
