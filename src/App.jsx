@@ -23,6 +23,7 @@ import {
   deleteObjects,
   copyObject,
   getSignedGetUrl,
+  streamS3ObjectToWritable,
 } from '@/utils/s3Client';
 import Sidebar from '@/components/Sidebar';
 import EditorPane from '@/components/EditorPane';
@@ -36,6 +37,7 @@ import { ConfirmModal } from '@/components/modals/ConfirmModal';
 import { MoveFileModal } from '@/components/modals/MoveFileModal';
 import { MoveFolderModal } from '@/components/modals/MoveFolderModal';
 import { CreateItemModal } from '@/components/modals/CreateItemModal';
+import { DownloadMethodModal } from '@/components/modals/DownloadMethodModal';
 import SettingsPage from '@/pages/SettingsPage';
 import ExportPDFPage from '@/pages/ExportPDFPage';
 import { useRecording } from '@/hooks/useRecording';
@@ -134,6 +136,9 @@ function MainApp() {
   const [showCloseFileConfirmModal, setShowCloseFileConfirmModal] = useState(false);
   const [dropTarget, setDropTarget] = useState(null);
   const expandPathsRef = useRef(null);
+  const [showDownloadMethodModal, setShowDownloadMethodModal] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadComplete, setDownloadComplete] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const lastSelectedIdRef = useRef(null);
 
@@ -1103,18 +1108,32 @@ function MainApp() {
     }
   };
 
+  const handleRequestDownload = () => {
+    setShowDownloadMethodModal(true);
+    setDownloadProgress(0);
+    setDownloadComplete(false);
+  };
+
+  /** Object URL 방식: 메모리 제한 ~100–200MB. presigned URL 인코딩 이슈 회피 */
   const handleDownloadCurrentFile = async () => {
     if (!currentFile) return;
     if (currentFile.type === 's3') {
       try {
         const client = getS3Client();
         if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
-        const url = await getSignedGetUrl(client, s3Creds.bucket, currentFile.id, 60);
-        window.open(url, '_blank');
+        const { body } = await getObjectBody(client, s3Creds.bucket, currentFile.id);
+        const blob = new Blob([body]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = currentFile.name || currentFile.id.split('/').filter(Boolean).pop() || 'download';
+        a.click();
+        URL.revokeObjectURL(url);
       } catch (e) {
-        console.error('Signed URL 생성 실패:', e);
-        alert('파일 다운로드 URL을 생성하지 못했습니다.');
+        console.error('S3 다운로드 실패:', e);
+        alert('파일 다운로드에 실패했습니다: ' + (e?.message || e));
       }
+      setShowDownloadMethodModal(false);
     } else if (currentFile.type === 'local' && currentFile.handle) {
       try {
         const file = await currentFile.handle.getFile();
@@ -1127,6 +1146,78 @@ function MainApp() {
       } catch (e) {
         console.error('로컬 파일 다운로드 실패:', e);
         alert('다운로드에 실패했습니다.');
+      }
+      setShowDownloadMethodModal(false);
+    }
+  };
+
+  /** Storage API: 폴더 선택 후 스트리밍 저장. 진행률 표시 */
+  const handleDownloadToFolder = async () => {
+    if (!currentFile) return;
+    if (currentFile.type === 's3') {
+      try {
+        if (!('showDirectoryPicker' in window)) {
+          alert('이 브라우저는 폴더 선택을 지원하지 않습니다. Chrome, Edge를 사용해 주세요.');
+          setShowDownloadMethodModal(false);
+          return;
+        }
+        const dirHandle = await window.showDirectoryPicker();
+        const fileName = currentFile.name || currentFile.id.split('/').filter(Boolean).pop() || 'download';
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+
+        await streamS3ObjectToWritable(
+          client,
+          s3Creds.bucket,
+          currentFile.id,
+          writable,
+          (percent) => setDownloadProgress(percent),
+        );
+        setDownloadComplete(true);
+      } catch (e) {
+        if (e?.name === 'AbortError') {
+          setShowDownloadMethodModal(false);
+          return;
+        }
+        console.error('폴더에 저장 실패:', e);
+        alert('폴더에 저장에 실패했습니다: ' + (e?.message || e));
+        setShowDownloadMethodModal(false);
+      }
+    } else if (currentFile.type === 'local' && currentFile.handle) {
+      try {
+        if (!('showDirectoryPicker' in window)) {
+          alert('이 브라우저는 폴더 선택을 지원하지 않습니다. Chrome, Edge를 사용해 주세요.');
+          setShowDownloadMethodModal(false);
+          return;
+        }
+        const dirHandle = await window.showDirectoryPicker();
+        const file = await currentFile.handle.getFile();
+        const fileName = currentFile.name || file.name;
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        const total = file.size;
+        const reader = file.stream().getReader();
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await writable.write(value);
+          received += value.length;
+          if (total) setDownloadProgress(Math.min(100, (received / total) * 100));
+        }
+        await writable.close();
+        setDownloadComplete(true);
+      } catch (e) {
+        if (e?.name === 'AbortError') {
+          setShowDownloadMethodModal(false);
+          return;
+        }
+        console.error('폴더에 저장 실패:', e);
+        alert('폴더에 저장에 실패했습니다: ' + (e?.message || e));
+        setShowDownloadMethodModal(false);
       }
     }
   };
@@ -1220,7 +1311,7 @@ function MainApp() {
     }
   };
 
-  const renameS3File = async (file, newName) => {
+  const renameS3File = async (file, newName, contentOverride = null) => {
     const client = getS3Client();
     if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
 
@@ -1231,12 +1322,26 @@ function MainApp() {
 
     if (newKey === oldKey) return file;
 
-    await copyObject(client, s3Creds.bucket, oldKey, newKey);
+    if (contentOverride != null && typeof contentOverride === 'string') {
+      const viewer = file.viewer || 'markdown';
+      const contentType =
+        viewer === 'json' ? 'application/json' : viewer === 'raw' ? 'text/plain' : 'text/markdown';
+      await putObject(client, {
+        Bucket: s3Creds.bucket,
+        Key: newKey,
+        Body: contentOverride,
+        ContentType: contentType,
+      });
+    } else {
+      await copyObject(client, s3Creds.bucket, oldKey, newKey);
+    }
     await deleteObject(client, s3Creds.bucket, oldKey);
 
-    loadS3Files();
+    await loadS3Files();
 
-    return { ...file, id: newKey, name: newName };
+    const result = { ...file, id: newKey, name: newName };
+    if (contentOverride != null) result.content = contentOverride;
+    return result;
   };
 
   const renameLocalFile = async (file, newName) => {
@@ -1270,7 +1375,9 @@ function MainApp() {
     try {
       let updated = null;
       if (currentFile.type === 's3') {
-        updated = await renameS3File(currentFile, trimmed);
+        const hasUnsaved = currentFile.content !== editorContent;
+        const contentOverride = hasUnsaved ? editorContent : null;
+        updated = await renameS3File(currentFile, trimmed, contentOverride);
       } else if (currentFile.type === 'local') {
         updated = await renameLocalFile(currentFile, trimmed);
       }
@@ -1721,7 +1828,7 @@ function MainApp() {
           const parentPath = prefix.slice(0, prefix.length - (node.name?.length ?? 0) - 1);
           const destPrefix = `${parentPath}${trimmed}/`;
           await moveS3FolderToFolder(node, destPrefix);
-          loadS3Files();
+          await loadS3Files();
           if (currentFile && currentFile.type === 's3' && currentFile.id.startsWith(node.path)) {
             const newPath = currentFile.id.replace(prefix, destPrefix);
             setCurrentFile((prev) => (prev && prev.type === 's3' ? { ...prev, id: newPath } : prev));
@@ -1746,11 +1853,13 @@ function MainApp() {
         const ext = lastDot > 0 ? originalName.slice(lastDot) : '';
         const newName = `${trimmed}${ext}`;
 
-        await renameS3File({ id: node.path, name: node.name }, newName);
-        if (currentFile && currentFile.type === 's3' && currentFile.id === node.path) {
-          const updated = await renameS3File(currentFile, newName);
-          setCurrentFile(updated);
-        }
+        const isCurrentFile = currentFile?.type === 's3' && currentFile?.id === node.path;
+        const fileToRename = isCurrentFile ? { ...currentFile, viewer: currentFile.viewer } : { id: node.path, name: node.name };
+        const hasUnsaved = isCurrentFile && currentFile.content !== editorContent;
+        const contentOverride = hasUnsaved ? editorContent : null;
+
+        const updated = await renameS3File(fileToRename, newName, contentOverride);
+        if (isCurrentFile) setCurrentFile(updated);
       } else if (storageType === 'local') {
         const pHandle = node.parentHandle || localRootHandle;
         if (!pHandle) throw new Error('루트 폴더를 먼저 열어주세요.');
@@ -2272,6 +2381,7 @@ function MainApp() {
                 deletingFolderPath={deletingFolderPath}
                 isDeletingFolder={isDeletingFolder}
                 expandPathsRef={expandPathsRef}
+                onRefreshS3={loadS3Files}
               />
             </div>
             {!isMobile && (
@@ -2338,7 +2448,7 @@ function MainApp() {
                   onRequestClose={handleRequestCloseEditor}
                   onRequestMove={handleRequestMove}
                   onViewUnsupportedAsText={handleViewUnsupportedAsText}
-                  onDownloadCurrentFile={handleDownloadCurrentFile}
+                  onRequestDownload={handleRequestDownload}
                   theme={theme}
                   previewOnly={isMobile}
                   isRecording={isRecording}
@@ -2384,7 +2494,7 @@ function MainApp() {
                   onRequestClose={handleRequestCloseEditor}
                   onRequestMove={handleRequestMove}
                   onViewUnsupportedAsText={handleViewUnsupportedAsText}
-                  onDownloadCurrentFile={handleDownloadCurrentFile}
+                  onRequestDownload={handleRequestDownload}
                   theme={theme}
                   previewOnly={isMobile}
                   isRecording={isRecording}
@@ -2541,6 +2651,22 @@ function MainApp() {
         onCancel={() => {
           setShowImportPasswordModal(false);
           setImportFileContent(null);
+        }}
+      />
+
+      <DownloadMethodModal
+        isOpen={showDownloadMethodModal}
+        fileName={currentFile?.name || currentFile?.id?.split('/').filter(Boolean).pop()}
+        onSelectLegacy={handleDownloadCurrentFile}
+        onSelectStorageApi={handleDownloadToFolder}
+        onCancel={() => setShowDownloadMethodModal(false)}
+        isDownloading={downloadProgress > 0 && downloadProgress < 100 && !downloadComplete}
+        downloadProgress={downloadProgress}
+        downloadComplete={downloadComplete}
+        onCloseComplete={() => {
+          setShowDownloadMethodModal(false);
+          setDownloadProgress(0);
+          setDownloadComplete(false);
         }}
       />
 

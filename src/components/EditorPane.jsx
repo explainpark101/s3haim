@@ -35,7 +35,7 @@ export default function EditorPane({
   onRequestClose,
   onRequestMove,
   onViewUnsupportedAsText,
-  onDownloadCurrentFile,
+  onRequestDownload,
   theme = 'light',
   previewOnly = false,
   isRecording = false,
@@ -202,6 +202,19 @@ export default function EditorPane({
                   <IconFolder size={14} />
                   파일 이동
                 </button>
+                {onRequestDownload && (
+                  <button
+                    type="button"
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-odp-fgStrong hover:bg-gray-100 dark:hover:bg-odp-bgSoft flex items-center gap-2"
+                    onClick={() => {
+                      onRequestDownload?.();
+                      setFileManagementOpen(false);
+                    }}
+                  >
+                    <IconDownload size={14} />
+                    다운로드
+                  </button>
+                )}
                 <button
                   type="button"
                   className="w-full px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
@@ -367,7 +380,7 @@ export default function EditorPane({
             <p className="text-sm text-gray-500 dark:text-odp-muted">
               이 파일 형식은 에디터에서 미리보기를 지원하지 않습니다.
             </p>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <Button
                 type="button"
                 variant="secondary"
@@ -376,14 +389,16 @@ export default function EditorPane({
               >
                 <IconFileCode size={16} /> 텍스트 에디터로 보기
               </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={onDownloadCurrentFile}
-              >
-                <IconDownload size={16} /> 다운로드
-              </Button>
+              {onRequestDownload && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  onClick={onRequestDownload}
+                >
+                  <IconDownload size={16} /> 다운로드
+                </Button>
+              )}
             </div>
           </div>
         ) : (

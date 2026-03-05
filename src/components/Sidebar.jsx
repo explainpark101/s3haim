@@ -39,6 +39,7 @@ import {
   IconSun,
   IconMoon,
   IconUpload,
+  IconRefresh,
 } from '@/components/icons';
 import { ArrowRightToLine } from 'lucide-react';
 
@@ -147,6 +148,7 @@ export default function Sidebar({
   onDragEndNode,
   dropTarget,
   expandPathsRef,
+  onRefreshS3,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [lastFocusedS3FolderPath, setLastFocusedS3FolderPath] = useState('');
@@ -439,9 +441,18 @@ export default function Sidebar({
         <div>
           <div className="sticky top-0 bg-white dark:bg-odp-bgSoft px-3 py-2 flex items-center justify-between text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 z-10 border-b border-gray-100 dark:border-odp-surface">
             <span className="flex items-center gap-1">
-              <IconCloud /> S3 Storage
+              <IconCloud /> S3
             </span>
             <div className="flex gap-1">
+              {onRefreshS3 && s3Bucket && (
+                <button
+                  onClick={() => onRefreshS3()}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
+                  title="파일 구조 새로고침"
+                >
+                  <IconRefresh size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
+                </button>
+              )}
               <button
                 onClick={() => {
                   const targetPath = lastFocusedS3FolderPath || '';

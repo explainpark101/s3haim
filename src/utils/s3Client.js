@@ -145,6 +145,56 @@ export async function copyObject(client, bucket, copySourceKey, key) {
 }
 
 /**
+ * Stream S3 object to FileSystemWritableFileStream with progress callback.
+ * @param {S3Client} client
+ * @param {string} bucket
+ * @param {string} key
+ * @param {FileSystemWritableFileStream} writable
+ * @param {(percent: number) => void} [onProgress] 0–100
+ * @returns {Promise<{ ContentLength?: number }>}
+ */
+export async function streamS3ObjectToWritable(client, bucket, key, writable, onProgress) {
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ResponseCacheControl: 'no-cache, no-store, must-revalidate',
+  });
+  const response = await client.send(command);
+  const contentLength = response.ContentLength ?? 0;
+  const body = response.Body;
+
+  let stream;
+  if (body.transformToWebStream) {
+    stream = body.transformToWebStream();
+  } else if (body && typeof body.getReader === 'function') {
+    stream = body;
+  } else {
+    const bytes = await body.transformToByteArray();
+    await writable.write(bytes);
+    await writable.close();
+    if (onProgress) onProgress(100);
+    return { ContentLength: contentLength };
+  }
+
+  const reader = stream.getReader();
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writable.write(value);
+      received += value.length;
+      if (onProgress && contentLength) {
+        onProgress(Math.min(100, (received / contentLength) * 100));
+      }
+    }
+  } finally {
+    await writable.close();
+  }
+  return { ContentLength: contentLength };
+}
+
+/**
  * Generate a presigned GET URL for an object.
  * @param {S3Client} client
  * @param {string} bucket
