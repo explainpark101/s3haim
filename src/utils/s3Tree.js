@@ -136,6 +136,24 @@ export const findFileNodeByPath = (nodes, path) => {
 };
 
 /**
+ * Flatten tree to array of paths in display order (depth-first).
+ * @param {Array} nodes
+ * @returns {string[]}
+ */
+export const flattenTreeToPaths = (nodes) => {
+  const result = [];
+  const walk = (list) => {
+    if (!list) return;
+    for (const node of list) {
+      if (node.path) result.push(node.path);
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return result;
+};
+
+/**
  * Find any node (file or folder) by path in the tree.
  * @param {Array} nodes
  * @param {string} path - e.g. "notes/foo.md" or "notes/"

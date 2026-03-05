@@ -13,7 +13,7 @@ import {
   disableWebAuthnUnlock,
   updateWebAuthnWrappedPassword,
 } from '@/utils/webauthn';
-import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath, findNodeByPath, getRecordingKeysFromTree } from '@/utils/s3Tree';
+import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath, findNodeByPath, flattenTreeToPaths, getRecordingKeysFromTree } from '@/utils/s3Tree';
 import {
   createS3Client,
   listObjectsV2,
@@ -98,6 +98,7 @@ export default function App() {
   const [moveFolderTarget, setMoveFolderTarget] = useState(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createModalContext, setCreateModalContext] = useState(null);
+  const [moveModalSelectPath, setMoveModalSelectPath] = useState(null);
   const [isCreateSubmitting, setIsCreateSubmitting] = useState(false);
   const [showExportPasswordModal, setShowExportPasswordModal] = useState(false);
   const [showImportPasswordModal, setShowImportPasswordModal] = useState(false);
@@ -111,6 +112,8 @@ export default function App() {
   const [showCloseFileConfirmModal, setShowCloseFileConfirmModal] = useState(false);
   const [dropTarget, setDropTarget] = useState(null);
   const expandPathsRef = useRef(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const lastSelectedIdRef = useRef(null);
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
@@ -864,12 +867,71 @@ export default function App() {
     }
   };
 
+  const toSelectKey = (storageType, path) => `${storageType}:${path}`;
+
+  const handleTreeNodeSelect = useCallback(
+    (storageType, node, modifiers = {}) => {
+      const { ctrlKey = false, metaKey = false, shiftKey = false } = modifiers;
+      const isRange = shiftKey;
+
+      const tree = storageType === 's3' ? s3Tree : localTree;
+      const flatPaths = flattenTreeToPaths(tree);
+      const path = node.path;
+      const key = toSelectKey(storageType, path);
+
+      if (isRange && lastSelectedIdRef.current != null) {
+        const lastKey = lastSelectedIdRef.current;
+        const colonIdx = lastKey.indexOf(':');
+        const lastType = colonIdx >= 0 ? lastKey.slice(0, colonIdx) : storageType;
+        const lastPath = colonIdx >= 0 ? lastKey.slice(colonIdx + 1) : lastKey;
+        if (lastType === storageType) {
+          const anchorIdx = flatPaths.indexOf(lastPath);
+          const clickIdx = flatPaths.indexOf(path);
+          if (anchorIdx >= 0 && clickIdx >= 0) {
+            const [lo, hi] = anchorIdx <= clickIdx ? [anchorIdx, clickIdx] : [clickIdx, anchorIdx];
+            setSelectedIds((prev) => {
+              const next = new Set(prev);
+              for (let i = lo; i <= hi; i++) {
+                next.add(toSelectKey(storageType, flatPaths[i]));
+              }
+              return next;
+            });
+            lastSelectedIdRef.current = key;
+            if (node.type === 'file') {
+              if (isMobile) setSidebarOpen(false);
+              selectFileRaw(storageType, node);
+            }
+            return;
+          }
+        }
+      }
+
+      if (ctrlKey || metaKey) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        lastSelectedIdRef.current = key;
+      } else {
+        setSelectedIds(new Set([key]));
+        lastSelectedIdRef.current = key;
+      }
+
+      if (node.type === 'file') {
+        if (isMobile) setSidebarOpen(false);
+        selectFileRaw(storageType, node);
+      }
+    },
+    [isMobile, s3Tree, localTree, selectFileRaw]
+  );
+
   const selectFile = useCallback(
     (type, node) => {
-      if (isMobile) setSidebarOpen(false);
-      selectFileRaw(type, node);
+      handleTreeNodeSelect(type, node, {});
     },
-    [isMobile, selectFileRaw]
+    [handleTreeNodeSelect]
   );
 
   // Persist last opened file (S3 or local) for restore on next load
@@ -1396,10 +1458,15 @@ export default function App() {
 
   const handleCreateItemSubmit = async (nameInput) => {
     if (!createModalContext) return;
-    const { storageType, parentPath, parentDirHandle, type } = createModalContext;
+    const { storageType, parentPath, parentDirHandle, type, fromMoveModal } = createModalContext;
     setIsCreateSubmitting(true);
     try {
       await createItem(storageType, parentPath, parentDirHandle, type, nameInput);
+      if (type === 'folder' && fromMoveModal) {
+        const trimmed = (nameInput || '').trim();
+        const newPath = parentPath + trimmed + '/';
+        setMoveModalSelectPath(newPath);
+      }
       setCreateModalOpen(false);
       setCreateModalContext(null);
     } catch (e) {
@@ -1681,8 +1748,13 @@ export default function App() {
       alert("이름 변경 실패: " + e.message);
     }
   };
-  const handleRequestMove = () => {
+  const handleRequestMove = async () => {
     if (!currentFile) return;
+    if (currentFile.type === 's3') {
+      await loadS3Files();
+    } else if (currentFile.type === 'local' && localRootHandle) {
+      await refreshLocalTree();
+    }
     setIsMoveModalOpen(true);
   };
 
@@ -2123,7 +2195,9 @@ export default function App() {
                 localTree={localTree}
                 localRootHandle={localRootHandle}
                 currentFile={currentFile}
-                onSelectFile={selectFile}
+                selectedIds={selectedIds}
+                onSelectFile={handleTreeNodeSelect}
+                onClearSelection={() => setSelectedIds(new Set())}
                 onCreateItem={requestCreateItem}
                 onRequestUploadFile={requestUploadFile}
                 onRequestUploadFolder={requestUploadFolder}
@@ -2431,8 +2505,27 @@ export default function App() {
         localTree={localTree}
         localRootHandle={localRootHandle}
         currentFile={currentFile}
-        onClose={() => setIsMoveModalOpen(false)}
+        onClose={() => {
+          setIsMoveModalOpen(false);
+          setMoveModalSelectPath(null);
+        }}
         onConfirm={handleConfirmMove}
+        onRequestCreateFolder={
+          currentFile
+            ? (parentPath, parentDirHandle) => {
+                setCreateModalContext({
+                  storageType: currentFile.type,
+                  parentPath,
+                  parentDirHandle,
+                  type: 'folder',
+                  fromMoveModal: true,
+                });
+                setCreateModalOpen(true);
+              }
+            : undefined
+        }
+        selectPathAfterCreate={moveModalSelectPath}
+        onSelectPathAfterCreateApplied={() => setMoveModalSelectPath(null)}
       />
 
       {/* Move Folder Modal */}

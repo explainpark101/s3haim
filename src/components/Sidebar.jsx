@@ -1,5 +1,6 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import TreeNode from '@/components/TreeNode';
+import { findNodeByPath } from '@/utils/s3Tree';
 
 const EXPANDED_FOLDERS_KEY = 's3haim_expandedFolders';
 
@@ -39,6 +40,7 @@ import {
   IconMoon,
   IconUpload,
 } from '@/components/icons';
+import { ArrowRightToLine } from 'lucide-react';
 
 const DATA_TRANSFER_TYPE = 'application/x-s3haim-tree-node';
 
@@ -104,7 +106,7 @@ function RootDropZone({ storageType, localRootHandle, onDropOnFolder, dropTarget
       onDrop={handleDrop}
       className={`flex items-center gap-1.5 py-1.5 pr-2 px-2 transition-colors text-sm cursor-default ${
         isDropTarget
-          ? 'ring-2 ring-blue-500 dark:ring-blue-400 bg-blue-50/50 dark:bg-blue-900/20 rounded'
+          ? 'bg-blue-100 dark:bg-blue-900/40 rounded'
           : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-odp-focusBg rounded'
       }`}
       style={{ paddingLeft: '8px' }}
@@ -125,7 +127,9 @@ export default function Sidebar({
   localTree,
   localRootHandle,
   currentFile,
+  selectedIds,
   onSelectFile,
+  onClearSelection,
   onCreateItem,
   onRequestUploadFile,
   onRequestUploadFolder,
@@ -151,6 +155,111 @@ export default function Sidebar({
     handle: null,
   });
   const [expandedPaths, setExpandedPaths] = useState(loadExpandedPaths);
+  const scrollContainerRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const autoScrollIntervalRef = useRef(null);
+  const EDGE_THRESHOLD = 48;
+  const AUTO_SCROLL_SPEED = 12;
+
+  const handleDragStartNode = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
+
+  const handleDragEndNode = useCallback(() => {
+    isDraggingRef.current = false;
+    if (autoScrollIntervalRef.current) {
+      clearInterval(autoScrollIntervalRef.current);
+      autoScrollIntervalRef.current = null;
+    }
+    onDragEndNode?.();
+  }, [onDragEndNode]);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (!isDraggingRef.current) return;
+      const rect = el.getBoundingClientRect();
+      const isOver =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (isOver) {
+        el.scrollTop += e.deltaY;
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('wheel', onWheel, { passive: false });
+    return () => document.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useEffect(() => {
+    const onDragEnd = () => {
+      isDraggingRef.current = false;
+      if (autoScrollIntervalRef.current) {
+        clearInterval(autoScrollIntervalRef.current);
+        autoScrollIntervalRef.current = null;
+      }
+    };
+    document.addEventListener('dragend', onDragEnd);
+    document.addEventListener('drop', onDragEnd);
+    return () => {
+      document.removeEventListener('dragend', onDragEnd);
+      document.removeEventListener('drop', onDragEnd);
+    };
+  }, []);
+
+  const handleScrollAreaDragEnter = useCallback((e) => {
+    const hasDragData =
+      e.dataTransfer?.types?.includes(DATA_TRANSFER_TYPE) ||
+      e.dataTransfer?.types?.includes?.('Files');
+    if (hasDragData) isDraggingRef.current = true;
+  }, []);
+
+  const handleScrollAreaDragOver = useCallback((e) => {
+    const el = scrollContainerRef.current;
+    const hasDragData =
+      e.dataTransfer?.types?.includes(DATA_TRANSFER_TYPE) ||
+      (e.dataTransfer?.types?.includes?.('Files') && e.dataTransfer?.items?.length > 0);
+    if (!el || !hasDragData) return;
+    const rect = el.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const threshold = EDGE_THRESHOLD;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll <= 0) return;
+
+    const stopAutoScroll = () => {
+      if (autoScrollIntervalRef.current) {
+        clearInterval(autoScrollIntervalRef.current);
+        autoScrollIntervalRef.current = null;
+      }
+    };
+
+    if (y < threshold) {
+      if (!autoScrollIntervalRef.current) {
+        autoScrollIntervalRef.current = setInterval(() => {
+          if (el) {
+            el.scrollTop = Math.max(0, el.scrollTop - AUTO_SCROLL_SPEED);
+          } else {
+            stopAutoScroll();
+          }
+        }, 16);
+      }
+    } else if (y > rect.height - threshold) {
+      if (!autoScrollIntervalRef.current) {
+        autoScrollIntervalRef.current = setInterval(() => {
+          if (el) {
+            el.scrollTop = Math.min(el.scrollHeight - el.clientHeight, el.scrollTop + AUTO_SCROLL_SPEED);
+          } else {
+            stopAutoScroll();
+          }
+        }, 16);
+      }
+    } else {
+      stopAutoScroll();
+    }
+  }, []);
 
   const handleExpandedChange = useCallback((storageType, path, isOpen) => {
     setExpandedPaths((prev) => {
@@ -244,6 +353,22 @@ export default function Sidebar({
     () => (searchTerm ? collectFolderPaths(filteredLocalTree) : expandedPaths.local),
     [searchTerm, filteredLocalTree, expandedPaths.local],
   );
+
+  const selectedFolderForMove = useMemo(() => {
+    if (!selectedIds?.size) return null;
+    for (const key of selectedIds) {
+      const colonIdx = key.indexOf(':');
+      const storageType = colonIdx >= 0 ? key.slice(0, colonIdx) : 's3';
+      const path = colonIdx >= 0 ? key.slice(colonIdx + 1) : key;
+      const tree = storageType === 's3' ? s3Tree : localTree;
+      const node = findNodeByPath(tree, path);
+      if (node?.type === 'folder' && path !== '.trash/') {
+        return { node, storageType };
+      }
+    }
+    return null;
+  }, [selectedIds, s3Tree, localTree]);
+
   return (
     <div className="w-full h-full min-h-0 bg-white dark:bg-odp-bgSoft border-r border-gray-200 dark:border-odp-bgSofter flex flex-col">
       <div className="p-4 border-b border-gray-200 dark:border-odp-bgSofter flex flex-col gap-3 bg-gray-50 dark:bg-odp-surface shrink-0">
@@ -274,10 +399,29 @@ export default function Sidebar({
             className="w-full bg-transparent border-none outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
           />
         </div>
+        {selectedFolderForMove && onRequestMoveFolder && (
+          <div className="flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-2 py-1.5 text-xs">
+            <span className="text-blue-700 dark:text-blue-300 truncate flex-1 min-w-0">
+              폴더 선택됨: {selectedFolderForMove.node.name}
+            </span>
+            <button
+              type="button"
+              onClick={() => onRequestMoveFolder(selectedFolderForMove.node, selectedFolderForMove.storageType)}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white shrink-0"
+              title="폴더 이동"
+            >
+              <ArrowRightToLine size={12} />
+              이동
+            </button>
+          </div>
+        )}
       </div>
 
       <div
+        ref={scrollContainerRef}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-4 space-y-6"
+        onDragEnter={handleScrollAreaDragEnter}
+        onDragOver={handleScrollAreaDragOver}
         onClick={(e) => {
           if (
             !e.target.closest('[data-tree-node-row]') &&
@@ -286,6 +430,7 @@ export default function Sidebar({
           ) {
             setLastFocusedS3FolderPath('');
             setLastFocusedLocalFolder({ path: '', handle: null });
+            onClearSelection?.();
           }
         }}
         role="presentation"
@@ -356,7 +501,7 @@ export default function Sidebar({
                     rootDropNode={{ path: '', type: 'folder', handle: null }}
                     onSelect={onSelectFile}
                     storageType="s3"
-                    currentFileId={currentFile?.id}
+                    selectedIds={selectedIds}
                     onCreateFile={(p) => onCreateItem('s3', p, null, 'file')}
                     onCreateFolder={(p) => onCreateItem('s3', p, null, 'folder')}
                     onRequestMoveFolder={onRequestMoveFolder}
@@ -372,7 +517,8 @@ export default function Sidebar({
                     }
                     focusedFolderPath={lastFocusedS3FolderPath}
                     onDropOnFolder={onDropOnFolder}
-                    onDragEndNode={onDragEndNode}
+                    onDragStartNode={handleDragStartNode}
+                    onDragEndNode={handleDragEndNode}
                     dropTarget={dropTarget}
                   />
                 ))
@@ -477,7 +623,7 @@ export default function Sidebar({
                 }
                 onSelect={onSelectFile}
                 storageType="local"
-                currentFileId={currentFile?.id}
+                selectedIds={selectedIds}
                 onCreateFile={(p, h) => onCreateItem('local', p, h, 'file')}
                 onCreateFolder={(p, h) => onCreateItem('local', p, h, 'folder')}
                 onRequestMoveFolder={onRequestMoveFolder}
@@ -497,7 +643,8 @@ export default function Sidebar({
                 }
                 focusedFolderPath={lastFocusedLocalFolder.path}
                 onDropOnFolder={onDropOnFolder}
-                onDragEndNode={onDragEndNode}
+                onDragStartNode={handleDragStartNode}
+                onDragEndNode={handleDragEndNode}
                 dropTarget={dropTarget}
               />
             ))}

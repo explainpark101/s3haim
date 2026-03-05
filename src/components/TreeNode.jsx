@@ -23,7 +23,7 @@ export default function TreeNode({
   onCreateFolder,
   onRequestMoveFolder,
   onDelete,
-  currentFileId,
+  selectedIds,
   storageType,
   onRename,
   deletingFolderPath,
@@ -47,7 +47,8 @@ export default function TreeNode({
       : false;
   const [isRenaming, setIsRenaming] = useState(false);
   const [tempName, setTempName] = useState(node.name);
-  const isSelected = currentFileId === node.path;
+  const selectKey = storageType && node.path ? `${storageType}:${node.path}` : node.path;
+  const isSelected = selectedIds && selectedIds.has && selectedIds.has(selectKey);
   const paddingLeft = `${level * 12 + 8}px`;
 
   const isTrashRoot = node.path === '.trash/';
@@ -212,21 +213,23 @@ export default function TreeNode({
 
   const handleToggle = (e) => {
     e.stopPropagation();
-    if (isUnderDeletingFolder) {
-      return;
-    }
+    if (isUnderDeletingFolder) return;
+
+    const modifiers = { ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey };
+    const hasModifier = e.ctrlKey || e.metaKey || e.shiftKey;
+
     if (node.type === 'folder') {
-      if (onExpandedChange && !isSearching) {
-        onExpandedChange(storageType, node.path, !isOpen);
-      }
-      if (onFolderFocus) {
-        onFolderFocus(node);
+      if (hasModifier && onSelect) {
+        onSelect(storageType, node, modifiers);
+      } else {
+        if (onExpandedChange && !isSearching) {
+          onExpandedChange(storageType, node.path, !isOpen);
+        }
+        if (onFolderFocus) onFolderFocus(node);
       }
     } else {
-      if (onFolderFocus && !node.path.includes('/')) {
-        onFolderFocus(null);
-      }
-      onSelect(storageType, node);
+      if (onFolderFocus && !node.path.includes('/')) onFolderFocus(null);
+      if (onSelect) onSelect(storageType, node, modifiers);
     }
   };
 
@@ -294,14 +297,16 @@ export default function TreeNode({
 
   const canDrag = !isTrashRoot && !isUnderDeletingFolder;
   const isRootLevel = level === 0;
-  const effectiveDropTarget = isRootLevel && rootDropNode ? rootDropNode : node;
+  const effectiveDropTarget =
+    isRootLevel && rootDropNode && node.type === 'file' ? rootDropNode : node;
   const isDropTarget =
     dropTarget?.storageType === storageType &&
     dropTarget?.folderPath === effectiveDropTarget.path;
-  const showDropHighlight =
-    (node.type === 'folder' || (node.type === 'file' && isRootLevel && rootDropNode)) &&
-    !isTrashRoot &&
-    isDropTarget;
+  const isUnderDropTarget =
+    dropTarget?.storageType === storageType &&
+    dropTarget?.folderPath &&
+    node.path.startsWith(dropTarget.folderPath);
+  const showDropHighlight = !isTrashRoot && (isDropTarget || isUnderDropTarget);
   const canAcceptDrop =
     (node.type === 'folder' || (node.type === 'file' && isRootLevel && rootDropNode)) &&
     !isTrashRoot;
@@ -323,7 +328,7 @@ export default function TreeNode({
           isFocusedFolder
             ? 'ring-2 ring-blue-400 dark:ring-blue-500 ring-offset-1 ring-offset-white dark:ring-offset-odp-bgSofter'
             : ''
-        } ${showDropHighlight ? 'ring-2 ring-blue-500 dark:ring-blue-400 bg-blue-50/50 dark:bg-blue-900/20' : ''}`}
+        } ${showDropHighlight ? 'bg-blue-100 dark:bg-blue-900/40' : ''}`}
         style={{ paddingLeft }}
         onClick={handleToggle}
       >
@@ -434,7 +439,7 @@ export default function TreeNode({
             onCreateFolder={onCreateFolder}
             onRequestMoveFolder={onRequestMoveFolder}
             onDelete={onDelete}
-            currentFileId={currentFileId}
+            selectedIds={selectedIds}
             storageType={storageType}
             onRename={onRename}
             deletingFolderPath={deletingFolderPath}

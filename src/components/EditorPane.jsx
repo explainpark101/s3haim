@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import {
   IconCloud,
+  IconChevronDown,
   IconDownload,
   IconFileCode,
   IconFolder,
+  IconMenu,
   IconRefresh,
   IconSave,
   IconTrash,
@@ -51,6 +53,19 @@ export default function EditorPane({
   const [recordingViewMode, setRecordingViewMode] = useState(false);
   const [showRecordingToolbar, setShowRecordingToolbar] = useState(false);
   const recordingAudioRef = useRef(null);
+  const [fileManagementOpen, setFileManagementOpen] = useState(false);
+  const fileManagementRef = useRef(null);
+
+  useEffect(() => {
+    if (!fileManagementOpen) return;
+    const handleClickOutside = (e) => {
+      if (fileManagementRef.current && !fileManagementRef.current.contains(e.target)) {
+        setFileManagementOpen(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [fileManagementOpen]);
 
   const formatRecordingLabel = (r) => {
     const d = new Date(r.timestamp);
@@ -159,26 +174,48 @@ export default function EditorPane({
               <span className="hidden md:inline"> 새로고침</span>
             </Button>
           )}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onRequestMove}
-            title="파일 이동"
-          >
-            <IconFolder size={14} />
-            <span className="hidden md:inline"> 파일 이동</span>
-          </Button>
-          <Button
-            type="button"
-            variant="danger"
-            size="sm"
-            onClick={onRequestDelete}
-            title="삭제"
-          >
-            <IconTrash size={16} />
-            <span className="hidden md:inline"> 삭제</span>
-          </Button>
+          <div ref={fileManagementRef} className="relative">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setFileManagementOpen((v) => !v)}
+              title="파일 관리"
+            >
+              <IconMenu size={14} />
+              <span className="hidden md:inline"> 파일 관리</span>
+              <IconChevronDown size={12} className="ml-0.5" />
+            </Button>
+            {fileManagementOpen && (
+              <div
+                className="absolute right-0 top-full mt-1 py-1 min-w-[140px] rounded-md shadow-lg border border-gray-200 dark:border-odp-borderSoft bg-white dark:bg-odp-surface z-50"
+                role="menu"
+              >
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-odp-fgStrong hover:bg-gray-100 dark:hover:bg-odp-bgSoft flex items-center gap-2"
+                  onClick={() => {
+                    onRequestMove?.();
+                    setFileManagementOpen(false);
+                  }}
+                >
+                  <IconFolder size={14} />
+                  파일 이동
+                </button>
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+                  onClick={() => {
+                    onRequestDelete?.();
+                    setFileManagementOpen(false);
+                  }}
+                >
+                  <IconTrash size={14} />
+                  삭제
+                </button>
+              </div>
+            )}
+          </div>
           <Button
             type="button"
             variant="primary"
