@@ -135,3 +135,22 @@ export const findFileNodeByPath = (nodes, path) => {
   return walk(nodes);
 };
 
+/**
+ * Find any node (file or folder) by path in the tree.
+ * @param {Array} nodes
+ * @param {string} path - e.g. "notes/foo.md" or "notes/"
+ * @returns {object | null}
+ */
+export const findNodeByPath = (nodes, path) => {
+  const walk = (list) => {
+    if (!list) return null;
+    for (const node of list) {
+      if (node.path === path) return node;
+      const found = node.children ? walk(node.children) : null;
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(nodes);
+};
+

@@ -52,7 +52,11 @@ export async function listObjectsV2(client, bucket, prefix = '') {
  * @returns {Promise<{ body: Uint8Array, ContentLength?: number, ContentType?: string }>}
  */
 export async function getObjectBody(client, bucket, key) {
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ResponseCacheControl: 'no-cache, no-store, must-revalidate',
+  });
   const response = await client.send(command);
   const body = await response.Body.transformToByteArray();
   return {
@@ -149,6 +153,11 @@ export async function copyObject(client, bucket, copySourceKey, key) {
  * @returns {Promise<string>}
  */
 export async function getSignedGetUrl(client, bucket, key, expiresIn = 60) {
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return getSignedUrl(client, command, { expiresIn });
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ResponseCacheControl: 'no-cache, no-store, must-revalidate',
+  });
+  const url = await getSignedUrl(client, command, { expiresIn });
+  return `${url}${url.includes('?') ? '&' : '?'}_=${Date.now()}`;
 }

@@ -1,5 +1,34 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import TreeNode from '@/components/TreeNode';
+
+const EXPANDED_FOLDERS_KEY = 's3haim_expandedFolders';
+
+function loadExpandedPaths() {
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(EXPANDED_FOLDERS_KEY) : null;
+    if (!raw) return { s3: new Set(), local: new Set() };
+    const data = JSON.parse(raw);
+    return {
+      s3: new Set(Array.isArray(data.s3) ? data.s3 : []),
+      local: new Set(Array.isArray(data.local) ? data.local : []),
+    };
+  } catch {
+    return { s3: new Set(), local: new Set() };
+  }
+}
+
+function saveExpandedPaths(expanded) {
+  try {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(
+      EXPANDED_FOLDERS_KEY,
+      JSON.stringify({
+        s3: Array.from(expanded.s3),
+        local: Array.from(expanded.local),
+      }),
+    );
+  } catch (_) {}
+}
 import {
   IconCloud,
   IconFilePlus,
@@ -11,6 +40,85 @@ import {
   IconUpload,
 } from '@/components/icons';
 
+const DATA_TRANSFER_TYPE = 'application/x-s3haim-tree-node';
+
+function RootDropZone({ storageType, localRootHandle, onDropOnFolder, dropTarget }) {
+  const rootNode = {
+    path: '',
+    type: 'folder',
+    name: 'root',
+    handle: storageType === 'local' ? localRootHandle : null,
+  };
+  const isDropTarget = dropTarget?.storageType === storageType && dropTarget?.folderPath === '';
+
+  const handleDragOver = (e) => {
+    const dt = e.dataTransfer;
+    if (dt.types.includes(DATA_TRANSFER_TYPE) || dt.files?.length > 0 || dt.items?.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      dt.dropEffect = 'move';
+      if (onDropOnFolder) onDropOnFolder(rootNode, storageType, 'dragOver');
+    }
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const dt = e.dataTransfer;
+    if (dt.types.includes(DATA_TRANSFER_TYPE)) {
+      try {
+        const data = JSON.parse(dt.getData(DATA_TRANSFER_TYPE));
+        if (onDropOnFolder) onDropOnFolder(rootNode, storageType, 'drop', data);
+      } catch (_) {}
+    } else if (dt.items?.length > 0 || dt.files?.length > 0) {
+      const files = [];
+      const dirHandles = [];
+      if (dt.items?.length > 0) {
+        for (const item of dt.items) {
+          if (item.kind === 'file') {
+            const handle = item.getAsFileSystemHandle?.();
+            if (handle?.kind === 'directory') {
+              dirHandles.push(handle);
+            } else {
+              const f = item.getAsFile();
+              if (f) files.push(f);
+            }
+          }
+        }
+      } else {
+        files.push(...Array.from(dt.files || []));
+      }
+      if (files.length > 0 || dirHandles.length > 0) {
+        if (onDropOnFolder) onDropOnFolder(rootNode, storageType, 'drop', { files, dirHandles });
+      }
+    }
+  };
+
+  const canDrop = storageType === 's3' || (storageType === 'local' && localRootHandle);
+
+  if (!canDrop) return null;
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className={`flex items-center gap-1.5 py-1.5 pr-2 px-2 transition-colors text-sm cursor-default ${
+        isDropTarget
+          ? 'ring-2 ring-blue-500 dark:ring-blue-400 bg-blue-50/50 dark:bg-blue-900/20 rounded'
+          : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-odp-focusBg rounded'
+      }`}
+      style={{ paddingLeft: '8px' }}
+    >
+      <span className="text-gray-400 dark:text-gray-500 w-4 flex justify-center shrink-0">
+        <IconFolder size={14} />
+      </span>
+      <span className="text-gray-500 dark:text-gray-400 truncate">
+        {storageType === 's3' ? '루트 (버킷 최상위)' : '루트 폴더'}
+      </span>
+    </div>
+  );
+}
+
 export default function Sidebar({
   s3Tree,
   s3Bucket,
@@ -20,6 +128,7 @@ export default function Sidebar({
   onSelectFile,
   onCreateItem,
   onRequestUploadFile,
+  onRequestUploadFolder,
   onRequestMoveFolder,
   onOpenLocalFolder,
   onSetDeleteTarget,
@@ -30,6 +139,10 @@ export default function Sidebar({
   showHiddenFolders,
   deletingFolderPath,
   isDeletingFolder,
+  onDropOnFolder,
+  onDragEndNode,
+  dropTarget,
+  expandPathsRef,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [lastFocusedS3FolderPath, setLastFocusedS3FolderPath] = useState('');
@@ -37,6 +150,44 @@ export default function Sidebar({
     path: '',
     handle: null,
   });
+  const [expandedPaths, setExpandedPaths] = useState(loadExpandedPaths);
+
+  const handleExpandedChange = useCallback((storageType, path, isOpen) => {
+    setExpandedPaths((prev) => {
+      const next = {
+        s3: new Set(prev.s3),
+        local: new Set(prev.local),
+      };
+      const set = storageType === 's3' ? next.s3 : next.local;
+      if (isOpen) set.add(path);
+      else set.delete(path);
+      saveExpandedPaths(next);
+      return next;
+    });
+  }, []);
+
+  const expandPathsForNewItem = useCallback((storageType, paths) => {
+    if (!paths?.length) return;
+    setExpandedPaths((prev) => {
+      const next = {
+        s3: new Set(prev.s3),
+        local: new Set(prev.local),
+      };
+      const set = storageType === 's3' ? next.s3 : next.local;
+      paths.forEach((p) => set.add(p));
+      saveExpandedPaths(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (expandPathsRef) {
+      expandPathsRef.current = expandPathsForNewItem;
+      return () => {
+        expandPathsRef.current = null;
+      };
+    }
+  }, [expandPathsRef, expandPathsForNewItem]);
 
   const filterTree = (nodes, { hideDotFolders } = {}) => {
     if (!searchTerm) return nodes;
@@ -72,6 +223,26 @@ export default function Sidebar({
   const filteredLocalTree = useMemo(
     () => filterTree(localTree, { hideDotFolders: false }),
     [localTree, searchTerm],
+  );
+
+  const collectFolderPaths = (nodes) => {
+    const paths = new Set();
+    const walk = (n) => {
+      if (n.type === 'folder' && n.path) {
+        paths.add(n.path);
+        if (n.children) n.children.forEach(walk);
+      }
+    };
+    nodes.forEach(walk);
+    return paths;
+  };
+  const effectiveExpandedS3 = useMemo(
+    () => (searchTerm ? collectFolderPaths(filteredS3Tree) : expandedPaths.s3),
+    [searchTerm, filteredS3Tree, expandedPaths.s3],
+  );
+  const effectiveExpandedLocal = useMemo(
+    () => (searchTerm ? collectFolderPaths(filteredLocalTree) : expandedPaths.local),
+    [searchTerm, filteredLocalTree, expandedPaths.local],
   );
   return (
     <div className="w-full h-full min-h-0 bg-white dark:bg-odp-bgSoft border-r border-gray-200 dark:border-odp-bgSofter flex flex-col">
@@ -132,9 +303,19 @@ export default function Sidebar({
                   onRequestUploadFile?.('s3', targetPath, null);
                 }}
                 className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
-                title="선택된 폴더에 파일 업로드"
+                title="선택된 폴더에 파일 업로드 (여러 개 선택 가능)"
               >
                 <IconUpload size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
+              </button>
+              <button
+                onClick={() => {
+                  const targetPath = lastFocusedS3FolderPath || '';
+                  onRequestUploadFolder?.('s3', targetPath, null);
+                }}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
+                title="선택된 폴더에 폴더 업로드 (폴더 전체)"
+              >
+                <IconFolder size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
               </button>
               <button
                 onClick={() => {
@@ -160,12 +341,19 @@ export default function Sidebar({
           </div>
           {s3Bucket ? (
             <div className="space-y-0.5">
+              <RootDropZone
+                storageType="s3"
+                localRootHandle={null}
+                onDropOnFolder={onDropOnFolder}
+                dropTarget={dropTarget}
+              />
               {filteredS3Tree.length > 0 ? (
                 filteredS3Tree.map((node) => (
                   <TreeNode
                     key={node.path}
                     node={node}
                     level={0}
+                    rootDropNode={{ path: '', type: 'folder', handle: null }}
                     onSelect={onSelectFile}
                     storageType="s3"
                     currentFileId={currentFile?.id}
@@ -177,10 +365,15 @@ export default function Sidebar({
                     deletingFolderPath={deletingFolderPath}
                     isDeletingFolder={isDeletingFolder}
                     isSearching={!!searchTerm}
+                    expandedPaths={effectiveExpandedS3}
+                    onExpandedChange={handleExpandedChange}
                     onFolderFocus={(node) =>
                       setLastFocusedS3FolderPath(node ? node.path || '' : '')
                     }
                     focusedFolderPath={lastFocusedS3FolderPath}
+                    onDropOnFolder={onDropOnFolder}
+                    onDragEndNode={onDragEndNode}
+                    dropTarget={dropTarget}
                   />
                 ))
               ) : (
@@ -209,9 +402,22 @@ export default function Sidebar({
                     onRequestUploadFile?.('local', target.path, target.handle);
                   }}
                   className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
-                  title="선택된 폴더에 파일 업로드"
+                  title="선택된 폴더에 파일 업로드 (여러 개 선택 가능)"
                 >
                   <IconUpload size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
+                </button>
+                <button
+                  onClick={() => {
+                    const target =
+                      lastFocusedLocalFolder.path && lastFocusedLocalFolder.handle
+                        ? lastFocusedLocalFolder
+                        : { path: '', handle: localRootHandle };
+                    onRequestUploadFolder?.('local', target.path, target.handle);
+                  }}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2.5 md:min-w-0 md:min-h-0 md:p-1 hover:text-blue-500 touch-manipulation"
+                  title="선택된 폴더에 폴더 업로드 (폴더 전체)"
+                >
+                  <IconFolder size={22} className="shrink-0 w-5 h-5 md:w-[14px] md:h-[14px]" />
                 </button>
                 <button
                   onClick={() => {
@@ -253,11 +459,22 @@ export default function Sidebar({
             </div>
           )}
           <div className="space-y-0.5">
+            <RootDropZone
+              storageType="local"
+              localRootHandle={localRootHandle}
+              onDropOnFolder={onDropOnFolder}
+              dropTarget={dropTarget}
+            />
             {filteredLocalTree.map((node) => (
               <TreeNode
                 key={node.path}
                 node={node}
                 level={0}
+                rootDropNode={
+                  localRootHandle
+                    ? { path: '', type: 'folder', handle: localRootHandle }
+                    : null
+                }
                 onSelect={onSelectFile}
                 storageType="local"
                 currentFileId={currentFile?.id}
@@ -269,6 +486,8 @@ export default function Sidebar({
                 deletingFolderPath={deletingFolderPath}
                 isDeletingFolder={isDeletingFolder}
                 isSearching={!!searchTerm}
+                expandedPaths={effectiveExpandedLocal}
+                onExpandedChange={handleExpandedChange}
                 onFolderFocus={(node) =>
                   setLastFocusedLocalFolder(
                     node
@@ -277,6 +496,9 @@ export default function Sidebar({
                   )
                 }
                 focusedFolderPath={lastFocusedLocalFolder.path}
+                onDropOnFolder={onDropOnFolder}
+                onDragEndNode={onDragEndNode}
+                dropTarget={dropTarget}
               />
             ))}
           </div>

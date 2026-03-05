@@ -13,7 +13,7 @@ import {
   disableWebAuthnUnlock,
   updateWebAuthnWrappedPassword,
 } from '@/utils/webauthn';
-import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath, getRecordingKeysFromTree } from '@/utils/s3Tree';
+import { buildS3Tree, getFileLastModifiedMap, findFileNodeByPath, findNodeByPath, getRecordingKeysFromTree } from '@/utils/s3Tree';
 import {
   createS3Client,
   listObjectsV2,
@@ -81,6 +81,7 @@ export default function App() {
 
   const fileInputRef = useRef(null);
   const uploadFileInputRef = useRef(null);
+  const uploadFolderInputRef = useRef(null);
   const [uploadTarget, setUploadTarget] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const sidebarResizeStateRef = useRef({
@@ -108,6 +109,8 @@ export default function App() {
   const [showSuffixChangeConfirmModal, setShowSuffixChangeConfirmModal] = useState(false);
   const [suffixConfirmAction, setSuffixConfirmAction] = useState('renameOnly'); // 'renameOnly' | 'renameAndSave'
   const [showCloseFileConfirmModal, setShowCloseFileConfirmModal] = useState(false);
+  const [dropTarget, setDropTarget] = useState(null);
+  const expandPathsRef = useRef(null);
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
@@ -1210,6 +1213,18 @@ export default function App() {
   };
 
   // 6. Create & Delete
+  const getParentPathsToExpand = (parentPath) => {
+    if (!parentPath || parentPath === '') return [];
+    const parts = parentPath.replace(/\/$/, '').split('/').filter(Boolean);
+    const result = [];
+    let acc = '';
+    for (const p of parts) {
+      acc += p + '/';
+      result.push(acc);
+    }
+    return result;
+  };
+
   const createItem = async (storageType, parentPath, parentDirHandle, type, nameInput) => {
     const name = (nameInput || '').trim();
     if (!name) return;
@@ -1225,9 +1240,13 @@ export default function App() {
         if (type === 'folder') {
           await putObject(client, { Bucket: s3Creds.bucket, Key: newPath, Body: '' });
           loadS3Files();
+          const parentPaths = getParentPathsToExpand(parentPath);
+          expandPathsRef.current?.(storageType, parentPaths);
         } else {
           await putObject(client, { Bucket: s3Creds.bucket, Key: newPath, Body: '' });
           loadS3Files();
+          const parentPaths = getParentPathsToExpand(parentPath);
+          expandPathsRef.current?.(storageType, parentPaths);
           setCurrentFile({ type: 's3', id: newPath, name: finalName, content: '' });
           setEditorContent('');
           navigate(`/view/${newPath}`);
@@ -1238,8 +1257,12 @@ export default function App() {
 
         if (type === 'folder') {
           await targetDirHandle.getDirectoryHandle(finalName, { create: true });
+          const parentPaths = getParentPathsToExpand(parentPath);
+          expandPathsRef.current?.(storageType, parentPaths);
         } else {
           const newFileHandle = await targetDirHandle.getFileHandle(finalName, { create: true });
+          const parentPaths = getParentPathsToExpand(parentPath);
+          expandPathsRef.current?.(storageType, parentPaths);
           setCurrentFile({
             type: 'local',
             id: newPath,
@@ -1267,6 +1290,12 @@ export default function App() {
     setUploadTarget({ storageType, parentPath, parentDirHandle });
     uploadFileInputRef.current.value = '';
     uploadFileInputRef.current?.click();
+  };
+
+  const requestUploadFolder = (storageType, parentPath, parentDirHandle) => {
+    setUploadTarget({ storageType, parentPath, parentDirHandle });
+    uploadFolderInputRef.current.value = '';
+    uploadFolderInputRef.current?.click();
   };
 
   const handleUploadFileSelect = async (e) => {
@@ -1303,8 +1332,63 @@ export default function App() {
         }
         refreshLocalTree();
       }
+      const parentPaths = getParentPathsToExpand(parentPath);
+      expandPathsRef.current?.(storageType, parentPaths);
+      setOperationStatus(files.length > 1 ? `${files.length}개 파일 업로드 완료` : '업로드 완료');
     } catch (err) {
       alert('업로드 실패: ' + err.message);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleUploadFolderSelect = async (e) => {
+    const files = e.target.files;
+    if (!files?.length || !uploadTarget) return;
+    const { storageType, parentPath, parentDirHandle } = uploadTarget;
+    setUploadTarget(null);
+
+    try {
+      if (storageType === 's3') {
+        const client = getS3Client();
+        if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const relPath = file.webkitRelativePath || file.name;
+          const key = parentPath + relPath;
+          const body = await file.arrayBuffer();
+          await putObject(client, {
+            Bucket: s3Creds.bucket,
+            Key: key,
+            Body: new Uint8Array(body),
+            ContentType: file.type || 'application/octet-stream',
+          });
+        }
+        loadS3Files();
+      } else if (storageType === 'local') {
+        const targetDirHandle = parentDirHandle || localRootHandle;
+        if (!targetDirHandle) throw new Error('루트 폴더를 먼저 열어주세요.');
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const relPath = file.webkitRelativePath || file.name;
+          const parts = relPath.replace(/\/$/, '').split('/');
+          let dir = targetDirHandle;
+          for (let j = 0; j < parts.length - 1; j++) {
+            dir = await dir.getDirectoryHandle(parts[j], { create: true });
+          }
+          const fileName = parts[parts.length - 1];
+          const newFileHandle = await dir.getFileHandle(fileName, { create: true });
+          const writable = await newFileHandle.createWritable();
+          await writable.write(await file.arrayBuffer());
+          await writable.close();
+        }
+        refreshLocalTree();
+      }
+      const parentPaths = getParentPathsToExpand(parentPath);
+      expandPathsRef.current?.(storageType, parentPaths);
+      setOperationStatus(`${files.length}개 파일 업로드 완료`);
+    } catch (err) {
+      alert('폴더 업로드 실패: ' + err.message);
     } finally {
       e.target.value = '';
     }
@@ -1607,6 +1691,146 @@ export default function App() {
     setMoveFolderTarget({ node, storageType });
   };
 
+  const handleDropOnFolder = async (targetNode, targetStorageType, action, payload) => {
+    if (action === 'dragOver') {
+      setDropTarget({ folderPath: targetNode.path, storageType: targetStorageType });
+      return;
+    }
+    if (action === 'dragLeave') {
+      setDropTarget(null);
+      return;
+    }
+    if (action !== 'drop' || !targetNode || targetNode.type !== 'folder') return;
+
+    setDropTarget(null);
+
+    const destPath = targetNode.path || '';
+    const destHandle = targetStorageType === 'local' ? (targetNode.handle || localRootHandle) : null;
+
+    if (payload?.storageType !== undefined && payload?.path) {
+      const { storageType: srcStorageType, path: srcPath, nodeType } = payload;
+      if (srcStorageType !== targetStorageType) return;
+      if (srcPath === destPath) return;
+      if (nodeType === 'folder' && (destPath === srcPath || destPath.startsWith(srcPath))) return;
+
+      const tree = srcStorageType === 's3' ? s3Tree : localTree;
+      const srcNode = findNodeByPath(tree, srcPath);
+      if (!srcNode) return;
+
+      try {
+        if (nodeType === 'file') {
+          const fileNode = srcStorageType === 's3'
+            ? { id: srcPath, name: srcNode.name }
+            : srcNode;
+          if (srcStorageType === 's3') {
+            await moveS3FileToFolder(fileNode, destPath);
+            if (currentFile?.type === 's3' && currentFile.id === srcPath) {
+              setCurrentFile((prev) => (prev && prev.id === srcPath ? { ...prev, id: destPath + srcNode.name } : prev));
+            }
+          } else {
+            const updated = await moveLocalFileToFolder(fileNode, destHandle, destPath);
+            if (currentFile?.type === 'local' && currentFile.id === srcPath) {
+              setCurrentFile(updated);
+            }
+          }
+          setOperationStatus(`파일 이동 완료: ${srcNode.name}`);
+        } else {
+          const folderNode = srcNode;
+          if (srcStorageType === 's3') {
+            await moveS3FolderToFolder(folderNode, destPath);
+          } else {
+            await moveLocalFolderToFolder(folderNode, destHandle, destPath);
+          }
+          setOperationStatus(`폴더 이동 완료: ${folderNode.name}`);
+        }
+      } catch (e) {
+        alert('이동 실패: ' + e.message);
+        setOperationStatus(`이동 실패: ${e.message}`);
+      }
+      return;
+    }
+
+    if (payload?.files?.length > 0 || payload?.dirHandles?.length > 0) {
+      const { files = [], dirHandles = [] } = payload;
+      try {
+        if (targetStorageType === 's3') {
+          const client = getS3Client();
+          if (!client) throw new Error('S3 클라이언트를 초기화하지 못했습니다.');
+          const uploadFile = async (file, prefix) => {
+            const key = prefix + file.name;
+            const body = await file.arrayBuffer();
+            await putObject(client, {
+              Bucket: s3Creds.bucket,
+              Key: key,
+              Body: new Uint8Array(body),
+              ContentType: file.type || 'application/octet-stream',
+            });
+          };
+          const uploadDir = async (dirHandle, prefix) => {
+            for await (const entry of dirHandle.values()) {
+              if (entry.kind === 'file') {
+                const file = await entry.getFile();
+                await uploadFile(file, prefix);
+              } else if (entry.kind === 'directory') {
+                await uploadDir(entry, prefix + entry.name + '/');
+              }
+            }
+          };
+          for (const file of files) {
+            await uploadFile(file, destPath);
+          }
+          for (const handle of dirHandles) {
+            await uploadDir(handle, destPath + (handle.name || '') + '/');
+          }
+          loadS3Files();
+          const parentPaths = getParentPathsToExpand(destPath);
+          expandPathsRef.current?.(targetStorageType, parentPaths);
+        } else {
+          const targetDirHandle = destHandle || localRootHandle;
+          if (!targetDirHandle) throw new Error('루트 폴더를 먼저 열어주세요.');
+          const copyFile = async (file, dirHandle) => {
+            const newFileHandle = await dirHandle.getFileHandle(file.name, { create: true });
+            const writable = await newFileHandle.createWritable();
+            await writable.write(await file.arrayBuffer());
+            await writable.close();
+          };
+          const copyDir = async (dirHandle, destDirHandle) => {
+            const newDir = await destDirHandle.getDirectoryHandle(dirHandle.name, { create: true });
+            for await (const entry of dirHandle.values()) {
+              if (entry.kind === 'file') {
+                const file = await entry.getFile();
+                const fh = await newDir.getFileHandle(entry.name, { create: true });
+                const w = await fh.createWritable();
+                await w.write(await file.arrayBuffer());
+                await w.close();
+              } else if (entry.kind === 'directory') {
+                await copyDir(entry, await newDir.getDirectoryHandle(entry.name, { create: true }));
+              }
+            }
+          };
+          for (const file of files) {
+            await copyFile(file, targetDirHandle);
+          }
+          for (const handle of dirHandles) {
+            const subDir = await targetDirHandle.getDirectoryHandle(handle.name, { create: true });
+            await copyDir(handle, subDir);
+          }
+          refreshLocalTree();
+          const parentPaths = getParentPathsToExpand(destPath);
+          expandPathsRef.current?.(targetStorageType, parentPaths);
+        }
+        setOperationStatus(`업로드 완료`);
+      } catch (e) {
+        alert('업로드 실패: ' + e.message);
+        setOperationStatus(`업로드 실패: ${e.message}`);
+      }
+    }
+  };
+
+  const handleDragEndNode = () => {
+    setDropTarget(null);
+  };
+
   const handleConfirmMoveFolder = async (dest) => {
     if (!moveFolderTarget || !dest) return;
     const { node, storageType } = moveFolderTarget;
@@ -1828,6 +2052,15 @@ export default function App() {
         multiple
         className="hidden"
       />
+      {/* Hidden folder input for upload */}
+      <input
+        type="file"
+        ref={uploadFolderInputRef}
+        onChange={handleUploadFolderSelect}
+        webkitdirectory=""
+        directory=""
+        className="hidden"
+      />
 
       {/* Auth Modal (Lock Screen) */}
       <AuthModal
@@ -1893,7 +2126,11 @@ export default function App() {
                 onSelectFile={selectFile}
                 onCreateItem={requestCreateItem}
                 onRequestUploadFile={requestUploadFile}
+                onRequestUploadFolder={requestUploadFolder}
                 onRequestMoveFolder={handleRequestMoveFolder}
+                onDropOnFolder={handleDropOnFolder}
+                onDragEndNode={handleDragEndNode}
+                dropTarget={dropTarget}
                 onOpenLocalFolder={openLocalFolder}
                 onSetDeleteTarget={setDeleteTarget}
                 onOpenSettings={() => navigate('/settings')}
@@ -1905,6 +2142,7 @@ export default function App() {
                 showHiddenFolders={showHiddenFolders}
                 deletingFolderPath={deletingFolderPath}
                 isDeletingFolder={isDeletingFolder}
+                expandPathsRef={expandPathsRef}
               />
             </div>
             {!isMobile && (

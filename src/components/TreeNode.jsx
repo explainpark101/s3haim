@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   IconChevronDown,
   IconChevronRight,
@@ -12,6 +12,8 @@ import {
   IconTrash,
 } from '@/components/icons';
 import { PencilIcon, ArrowRightToLine } from 'lucide-react';
+
+const DATA_TRANSFER_TYPE = 'application/x-s3haim-tree-node';
 
 export default function TreeNode({
   node,
@@ -29,8 +31,20 @@ export default function TreeNode({
   isSearching = false,
   onFolderFocus,
   focusedFolderPath,
+  expandedPaths,
+  onExpandedChange,
+  onDragStartNode,
+  onDragEndNode,
+  onDropOnFolder,
+  dropTarget,
+  rootDropNode,
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const isOpen =
+    node.type === 'folder'
+      ? isSearching
+        ? true
+        : (expandedPaths ? expandedPaths.has(node.path) : false)
+      : false;
   const [isRenaming, setIsRenaming] = useState(false);
   const [tempName, setTempName] = useState(node.name);
   const isSelected = currentFileId === node.path;
@@ -96,14 +110,6 @@ export default function TreeNode({
   const FileIconComponent = getFileIcon();
   const iconColorClass = getIconColorClass();
 
-  useEffect(() => {
-    if (node.type !== 'folder') return;
-    if (isSearching) {
-      setIsOpen(true);
-    } else {
-      setIsOpen(false);
-    }
-  }, [isSearching, node.type]);
 
   const startTitleScroll = () => {
     const el = titleContainerRef.current;
@@ -146,13 +152,73 @@ export default function TreeNode({
     }
   };
 
+  const handleDragStart = (e) => {
+    if (isTrashRoot || isUnderDeletingFolder) return;
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData(DATA_TRANSFER_TYPE, JSON.stringify({ storageType, path: node.path, nodeType: node.type }));
+    e.dataTransfer.setData('text/plain', node.name);
+    if (onDragStartNode) onDragStartNode(node, storageType);
+  };
+
+  const handleDragEnd = () => {
+    if (onDragEndNode) onDragEndNode();
+  };
+
+  const handleDragOver = (e) => {
+    if (!canAcceptDrop) return;
+    const dt = e.dataTransfer;
+    if (dt.types.includes(DATA_TRANSFER_TYPE) || dt.files?.length > 0 || dt.items?.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      dt.dropEffect = 'move';
+      if (onDropOnFolder) onDropOnFolder(effectiveDropTarget, storageType, 'dragOver');
+    }
+  };
+
+  const handleDrop = async (e) => {
+    if (!canAcceptDrop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dt = e.dataTransfer;
+    if (dt.types.includes(DATA_TRANSFER_TYPE)) {
+      try {
+        const data = JSON.parse(dt.getData(DATA_TRANSFER_TYPE));
+        if (onDropOnFolder) onDropOnFolder(effectiveDropTarget, storageType, 'drop', data);
+      } catch (_) {}
+    } else if (dt.items?.length > 0 || dt.files?.length > 0) {
+      const files = [];
+      const dirHandles = [];
+      if (dt.items?.length > 0) {
+        for (const item of dt.items) {
+          if (item.kind === 'file') {
+            const handle = item.getAsFileSystemHandle?.();
+            if (handle?.kind === 'directory') {
+              dirHandles.push(handle);
+            } else {
+              const f = item.getAsFile();
+              if (f) files.push(f);
+            }
+          }
+        }
+      } else {
+        files.push(...Array.from(dt.files || []));
+      }
+      if (files.length > 0 || dirHandles.length > 0) {
+        if (onDropOnFolder) onDropOnFolder(effectiveDropTarget, storageType, 'drop', { files, dirHandles });
+      }
+    }
+  };
+
   const handleToggle = (e) => {
     e.stopPropagation();
     if (isUnderDeletingFolder) {
       return;
     }
     if (node.type === 'folder') {
-      setIsOpen((prev) => !prev);
+      if (onExpandedChange && !isSearching) {
+        onExpandedChange(storageType, node.path, !isOpen);
+      }
       if (onFolderFocus) {
         onFolderFocus(node);
       }
@@ -226,10 +292,29 @@ export default function TreeNode({
     }
   };
 
+  const canDrag = !isTrashRoot && !isUnderDeletingFolder;
+  const isRootLevel = level === 0;
+  const effectiveDropTarget = isRootLevel && rootDropNode ? rootDropNode : node;
+  const isDropTarget =
+    dropTarget?.storageType === storageType &&
+    dropTarget?.folderPath === effectiveDropTarget.path;
+  const showDropHighlight =
+    (node.type === 'folder' || (node.type === 'file' && isRootLevel && rootDropNode)) &&
+    !isTrashRoot &&
+    isDropTarget;
+  const canAcceptDrop =
+    (node.type === 'folder' || (node.type === 'file' && isRootLevel && rootDropNode)) &&
+    !isTrashRoot;
+
   return (
     <div>
       <div
         data-tree-node-row
+        draggable={canDrag}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={canAcceptDrop ? handleDragOver : undefined}
+        onDrop={canAcceptDrop ? handleDrop : undefined}
         className={`group flex items-center justify-between py-1.5 pr-2 transition-colors ${
           isSelected
             ? 'bg-blue-50 text-blue-700 dark:bg-odp-line dark:text-odp-fgStrong'
@@ -238,7 +323,7 @@ export default function TreeNode({
           isFocusedFolder
             ? 'ring-2 ring-blue-400 dark:ring-blue-500 ring-offset-1 ring-offset-white dark:ring-offset-odp-bgSofter'
             : ''
-        }`}
+        } ${showDropHighlight ? 'ring-2 ring-blue-500 dark:ring-blue-400 bg-blue-50/50 dark:bg-blue-900/20' : ''}`}
         style={{ paddingLeft }}
         onClick={handleToggle}
       >
@@ -355,8 +440,15 @@ export default function TreeNode({
             deletingFolderPath={deletingFolderPath}
             isDeletingFolder={isDeletingFolder}
             isSearching={isSearching}
+            expandedPaths={expandedPaths}
+            onExpandedChange={onExpandedChange}
             onFolderFocus={onFolderFocus}
             focusedFolderPath={focusedFolderPath}
+            onDragStartNode={onDragStartNode}
+            onDragEndNode={onDragEndNode}
+            onDropOnFolder={onDropOnFolder}
+            dropTarget={dropTarget}
+            rootDropNode={rootDropNode}
           />
         ))}
     </div>

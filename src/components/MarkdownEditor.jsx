@@ -24,6 +24,29 @@ export default function MarkdownEditor({ value, onChange, onSave, theme = 'light
   }, [previewOnly]);
 
   useEffect(() => {
+    if (previewOnly) return;
+    const registerPasteHandler = () => {
+      const api = editorRef.current?.value ?? editorRef.current;
+      if (!api?.domEventHandlers) return false;
+      api.domEventHandlers({
+        paste: (e, view) => {
+          const text = e.clipboardData?.getData('text/plain') ?? '';
+          if (text && view) {
+            e.preventDefault();
+            view.dispatch(view.state.replaceSelection(text));
+            return false;
+          }
+        },
+      });
+      return true;
+    };
+    if (!registerPasteHandler()) {
+      const id = setTimeout(registerPasteHandler, 100);
+      return () => clearTimeout(id);
+    }
+  }, [previewOnly]);
+
+  useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof onSave !== 'function') return;
     const handleKeyDown = (e) => {
@@ -46,6 +69,7 @@ export default function MarkdownEditor({ value, onChange, onSave, theme = 'light
         theme={theme}
         language="ko-KR"
         previewOnly={previewOnly}
+        autoDetectCode={true}
       />
     </div>
   );
