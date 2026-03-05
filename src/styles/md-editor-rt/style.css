@@ -1,5 +1,29 @@
-@reference "tailwindcss";
-/* @import "../../../tailwind.config.cjs"; */
+/* ODP dark theme colors (from tailwind.config) - defined locally for md-editor-rt */
+:root {
+  --color-odp-bg: #23272e;
+  --color-odp-bgSoft: #1e2227;
+  --color-odp-bgSofter: #181a1f;
+  --color-odp-surface: #23272e;
+  --color-odp-line: #2c313c;
+  --color-odp-focusBg: #323842;
+  --color-odp-border: #3e4452;
+  --color-odp-borderSoft: #23272e;
+  --color-odp-borderStrong: #343a45;
+  --color-odp-fg: #abb2bf;
+  --color-odp-fgStrong: #d7dae0;
+  --color-odp-muted: #7f848e;
+  --color-odp-accentBlue: #61afef;
+  --color-odp-accentYellow: #e5c07b;
+  --color-odp-accentOrange: #d19a66;
+  --color-odp-accentRed: #e06c75;
+  --color-odp-accentGreen: #98c379;
+  --color-odp-accentPurple: #c678dd;
+  --color-odp-dangerSoft: #3f262a;
+  --color-odp-dangerSoftHover: #5a3238;
+  --color-odp-warningSoft: #3d2e10;
+  --color-odp-warningText: #f0d38a;
+}
+
 :root {
   --md-scrollbar-bg-color: var(--color-gray-50);
   --md-scrollbar-thumb-color: var(--color-gray-500);
@@ -7,12 +31,16 @@
   --md-scrollbar-thumb-active-color: var(--color-gray-600);
   --md-border-color: var(--color-gray-200);
 }
-[data-theme="dark"] {
-  --md-scrollbar-bg-color: var(--color-gray-100);
+[data-theme="dark"],
+.dark,
+.md-editor-dark,
+.md-editor.md-editor-dark,
+html {
+  --md-scrollbar-bg-color: transparent;
   --md-scrollbar-thumb-color: var(--color-gray-300);
   --md-scrollbar-thumb-hover-color: var(--color-gray-400);
   --md-scrollbar-thumb-active-color: var(--color-gray-500);
-  --md-border-color: var(--color-slate-200);
+  --md-border-color: var(--color-odp-muted);
 }
 .md-editor .md-editor-preview {
   --md-theme-color: var(--md-color);
@@ -874,13 +902,15 @@
 .md-editor .md-editor-preview {
   --md-theme-table-stripe-color: var(--color-gray-50);
   --md-theme-table-tr-bg-color: inherit;
-  --md-theme-table-td-border-color: var(--md-theme-border-color)
+  --md-theme-table-td-border-color: var(--md-theme-border-color);
+  --md-theme-table-td-border-color-horizontal: var(--color-slate-300)
 }
 
 .md-editor-dark .md-editor-preview {
   --md-theme-table-stripe-color: var(--color-odp-bg);
   --md-theme-table-tr-bg-color: inherit;
-  --md-theme-table-td-border-color: var(--md-theme-border-color)
+  --md-theme-table-td-border-color: var(--md-theme-border-color);
+  --md-theme-table-td-border-color-horizontal: var(--color-odp-borderStrong)
 }
 
 .md-editor-preview table tr {
@@ -889,7 +919,9 @@
 
 .md-editor-preview table tr th,
 .md-editor-preview table tr td {
-  border: 1px solid var(--md-theme-table-td-border-color)
+  border: 1px solid var(--md-theme-table-td-border-color);
+  border-block-start: 1px solid var(--md-theme-table-td-border-color-horizontal);
+  border-block-end: 1px solid var(--md-theme-table-td-border-color-horizontal)
 }
 
 .md-editor-preview table tr:nth-child(2n) {
@@ -2443,7 +2475,26 @@ div.smart-blue-theme hr {
   transition: all .3s;
   opacity: 1;
   z-index: 20000;
-  background-color: var(--md-bk-color)
+  background-color: var(--md-bk-color, var(--color-white));
+  border: 1px solid var(--md-border-color);
+  border-radius: 3px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-slate-900) 15%, transparent)
+}
+
+.md-editor .md-editor-dropdown,
+.md-editor-modal-container .md-editor-dropdown {
+  background-color: var(--color-slate-50);
+  border-color: var(--color-slate-200);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-slate-900) 12%, transparent)
+}
+
+.md-editor-dark .md-editor-dropdown,
+.md-editor-modal-container[data-theme=dark] .md-editor-dropdown {
+  background-color: color-mix(in srgb, var(--color-odp-bgSoft) 96%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: var(--color-odp-border);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-odp-bg) 30%, transparent)
 }
 
 .md-editor-dropdown-hidden {
@@ -2475,6 +2526,23 @@ div.smart-blue-theme hr {
   position: fixed;
   z-index: 20001;
   box-shadow: var(--md-modal-shadow)
+}
+
+.md-editor-modal-container .export-pdf-modal .md-editor-modal,
+.md-editor-modal-container .export-pdf-modal .md-editor-modal-body,
+.md-editor-modal-container .export-pdf-modal .export-pdf-content {
+  background-color: var(--color-white)
+}
+
+.md-editor-modal-container[data-theme=dark] .export-pdf-modal .md-editor-modal,
+.md-editor-modal-container[data-theme=dark] .export-pdf-modal .md-editor-modal-body,
+.md-editor-modal-container[data-theme=dark] .export-pdf-modal .export-pdf-content,
+.md-editor-dark .export-pdf-modal .md-editor-modal,
+.md-editor-dark .export-pdf-modal .md-editor-modal-body,
+.md-editor-dark .export-pdf-modal .export-pdf-content {
+  background-color: color-mix(in srgb, var(--color-odp-bgSoft) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px)
 }
 
 .md-editor-modal-header {
@@ -2680,6 +2748,33 @@ div.smart-blue-theme hr {
   list-style: none;
   font-feature-settings: "tnum";
   scrollbar-width: none
+}
+
+.md-editor .md-editor-catalog-editor {
+  background-color: color-mix(in srgb, var(--color-white) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px)
+}
+
+.md-editor-dark .md-editor-catalog-editor {
+  background-color: color-mix(in srgb, var(--color-odp-bgSoft) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px)
+}
+
+.md-editor-catalog-fixed .md-editor-catalog-editor,
+.md-editor-catalog-fixed .md-editor-catalog {
+  background-color: color-mix(in srgb, var(--color-white) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 4px;
+  border: 1px solid var(--color-slate-200)
+}
+
+.md-editor-dark .md-editor-catalog-fixed .md-editor-catalog-editor,
+.md-editor-dark .md-editor-catalog-fixed .md-editor-catalog {
+  background-color: color-mix(in srgb, var(--color-odp-bgSoft) 92%, transparent);
+  border-color: var(--color-odp-border)
 }
 
 .md-editor-catalog-editor::-webkit-scrollbar {
@@ -2888,7 +2983,21 @@ div.smart-blue-theme hr {
   padding-inline: 0;
   border-radius: 3px;
   border: 1px solid var(--md-border-color);
-  background-color: inherit
+  background-color: var(--md-bk-color, var(--color-white))
+}
+
+.md-editor .md-editor-menu,
+.md-editor-modal-container .md-editor-menu {
+  background-color: var(--color-slate-50);
+  border-color: var(--color-slate-300)
+}
+
+.md-editor-dark .md-editor-menu,
+.md-editor-modal-container[data-theme=dark] .md-editor-menu {
+  background-color: color-mix(in srgb, var(--color-odp-bgSoft) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: var(--color-odp-border)
 }
 
 .md-editor-menu-item {
@@ -2917,7 +3026,7 @@ div.smart-blue-theme hr {
   padding-block: 4px;
   padding-inline: 4px;
   border-radius: 3px;
-  border: 1px solid var(--md-border-color);
+  border: 1px solid var(--md-border-color, var(--color-slate-300));
   display: flex;
   flex-direction: column
 }
@@ -2935,12 +3044,17 @@ div.smart-blue-theme hr {
 .md-editor-table-shape-col-default {
   width: 16px;
   height: 16px;
-  background-color: var(--color-slate-300);
+  background-color: var(--color-slate-400);
   border-radius: 3px;
   transition: all .2s
 }
 
 .md-editor-table-shape-col-include {
+  background-color: var(--color-slate-500);
+  transition: background-color .2s
+}
+
+.md-editor-table-shape-col-include:hover {
   background-color: var(--color-slate-400)
 }
 
@@ -3013,11 +3127,16 @@ div.smart-blue-theme hr {
 }
 
 .md-editor-dark .md-editor-table-shape-col-default {
-  background-color: var(--color-odp-bgSoft)
+  background-color: var(--color-odp-bg)
 }
 
 .md-editor-dark .md-editor-table-shape-col-include {
-  background-color: var(--color-odp-borderStrong)
+  background-color: var(--color-odp-focusBg);
+  transition: background-color .2s
+}
+
+.md-editor-dark .md-editor-table-shape-col-include:hover {
+  background-color: var(--color-odp-line)
 }
 
 .md-editor-floating-toolbar {
@@ -3279,7 +3398,6 @@ div.smart-blue-theme hr {
   --md-scrollbar-thumb-hover-color: var(--color-odp-muted);
   --md-scrollbar-thumb-active-color: var(--color-odp-muted)
 }
-
 .md-editor {
   --md-color: var(--color-slate-700);
   --md-hover-color: var(--color-slate-900);
@@ -3443,4 +3561,28 @@ svg.md-editor-icon {
 .md-editor-disabled {
   cursor: not-allowed !important;
   opacity: .6
+}
+
+/* PDF Export Modal - Print styles */
+@media print {
+  .md-editor-modal-mask,
+  .export-pdf-modal .md-editor-modal-header,
+  .export-pdf-modal .md-editor-modal-func,
+  .export-pdf-modal .md-editor-form-item {
+    display: none !important;
+  }
+
+  .export-pdf-modal .md-editor-modal-body {
+    display: block !important;
+    padding: 0 !important;
+    height: auto !important;
+  }
+
+  .export-pdf-modal .export-pdf-content {
+    overflow: visible !important;
+  }
+
+  #export-pdf-preview {
+    visibility: visible !important;
+  }
 }

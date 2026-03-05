@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { MdEditor, config } from 'md-editor-rt';
 // import 'md-editor-rt/lib/style.css';
 import "@/styles/md-editor-rt/style.css";
 import KO_KR from '@vavt/cm-extension/dist/locale/ko-KR';
+import ExportPDF from '@/components/ExportPDF';
 
 config({
   editorConfig: {
@@ -59,6 +60,23 @@ export default function MarkdownEditor({ value, onChange, onSave, theme = 'light
     return () => el.removeEventListener('keydown', handleKeyDown, true);
   }, [onSave]);
 
+  const defToolbars = useMemo(() => [
+    <ExportPDF
+      key="export-pdf"
+      value={value}
+      theme={theme}
+      language="ko-KR"
+    />,
+  ], [value, theme]);
+
+  const toolbars = useMemo(() => [
+    'bold', 'underline', 'italic', '-',
+    'strikeThrough', 'sub', 'sup', 'quote', 'unorderedList', 'orderedList', 'task', '-',
+    'codeRow', 'code', 'link', 'image', 'table', 'mermaid', 'katex', '-',
+    'revoke', 'next', 0, '=',
+    'pageFullscreen', 'fullscreen', 'previewOnly', 'preview',  'htmlPreview', 'catalog',
+  ], []);
+
   return (
     <div ref={containerRef} className="h-full w-full flex flex-col">
       <MdEditor
@@ -70,6 +88,8 @@ export default function MarkdownEditor({ value, onChange, onSave, theme = 'light
         language="ko-KR"
         previewOnly={previewOnly}
         autoDetectCode={true}
+        toolbars={toolbars}
+        defToolbars={defToolbars}
       />
     </div>
   );

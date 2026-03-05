@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Routes, Route, useNavigate } from 'react-router';
+import { Routes, Route, useNavigate, useLocation } from 'react-router';
 import { IconFile, IconMenu, IconX } from '@/components/icons';
 import { encryptData, decryptData } from '@/utils/crypto';
 import {
@@ -37,13 +37,44 @@ import { MoveFileModal } from '@/components/modals/MoveFileModal';
 import { MoveFolderModal } from '@/components/modals/MoveFolderModal';
 import { CreateItemModal } from '@/components/modals/CreateItemModal';
 import SettingsPage from '@/pages/SettingsPage';
+import ExportPDFPage from '@/pages/ExportPDFPage';
 import { useRecording } from '@/hooks/useRecording';
 import { runEncodeAndUploadPipeline, getSyncKeyForRecording } from '@/utils/recordingPipeline';
 import { decodeSyncData } from '@/utils/syncProto';
-import { savePendingUpload } from '@/utils/pendingUploadsDb';
+import { savePendingUpload, getPendingUploads } from '@/utils/pendingUploadsDb';
 import { syncPendingUploads } from '@/utils/syncPendingUploads';
+import { useActivityIndicator, ActivityTypes } from '@/contexts/ActivityIndicatorContext';
+import { useAuth } from '@/contexts/AuthContext';
+import ActivityIndicatorBar from '@/components/ActivityIndicatorBar';
 
 export default function App() {
+  const location = useLocation();
+  if (location.pathname === '/export-pdf') {
+    return (
+      <div className="export-pdf-layout min-h-screen max-w-screen bg-white dark:bg-odp-bgSofter print:bg-white">
+        <ExportPDFPage />
+      </div>
+    );
+  }
+  return <MainApp />;
+}
+
+function MainApp() {
+  const { addIndicator, removeIndicator } = useActivityIndicator();
+  const auth = useAuth();
+  const {
+    isUnlocked,
+    setIsUnlocked,
+    showAuthModal,
+    setShowAuthModal,
+    showSetPasswordModal,
+    setShowSetPasswordModal,
+    masterPassword,
+    setMasterPassword,
+    s3Creds,
+    setS3Creds,
+    unlock,
+  } = auth;
   const navigate = useNavigate();
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'light';
@@ -54,15 +85,6 @@ export default function App() {
       : 'light';
   });
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  
-  // Auth & Crypto State
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
-  const [masterPassword, setMasterPassword] = useState('');
-  
-  // S3 Creds
-  const [s3Creds, setS3Creds] = useState({ accessKeyId: '', secretAccessKey: '', region: 'ap-northeast-2', bucket: '', endpoint: '' });
   
   // File Systems State
   const [s3Tree, setS3Tree] = useState([]);
@@ -231,14 +253,7 @@ export default function App() {
   // 1. Init (marked & S3 client are from npm modules; no script loading)
   useEffect(() => {
     setScriptsLoaded(true);
-    checkStoredCredentials();
-  }, []);
-
-  useEffect(() => {
-    isWebAuthnPRFSupported().then(setWebauthnPRFSupported);
-  }, []);
-
-  const checkStoredCredentials = () => {
+    if (isUnlocked) return;
     const stored = localStorage.getItem('s3NotesEncrypted');
     if (stored) {
       setShowAuthModal(true);
@@ -246,7 +261,11 @@ export default function App() {
       setIsUnlocked(true);
       navigate('/settings');
     }
-  };
+  }, [isUnlocked, setShowAuthModal, setIsUnlocked, navigate]);
+
+  useEffect(() => {
+    isWebAuthnPRFSupported().then(setWebauthnPRFSupported);
+  }, []);
 
   // 2. Auth Actions
   const handleUnlock = async (password) => {
@@ -257,11 +276,7 @@ export default function App() {
       if (encryptedObj?.webauthn) throw new Error("보안 키로 저장된 데이터는 비밀번호로 해제할 수 없습니다.");
       const decryptedStr = await decryptData(password, encryptedObj);
       const creds = JSON.parse(decryptedStr);
-
-      setS3Creds(creds);
-      setMasterPassword(password);
-      setIsUnlocked(true);
-      setShowAuthModal(false);
+      unlock(creds, password);
     } catch (e) {
       alert(e?.message || "비밀번호가 틀렸거나 데이터가 손상되었습니다.");
       console.error(e);
@@ -271,10 +286,7 @@ export default function App() {
   const handleUnlockWithWebAuthn = async () => {
     if (isStoredWithWebAuthn()) {
       const creds = await loadCredsWithWebAuthn();
-      setS3Creds(creds);
-      setMasterPassword('');
-      setIsUnlocked(true);
-      setShowAuthModal(false);
+      unlock(creds, '');
       loadS3Files(creds);
       navigate('/');
     } else {
@@ -493,18 +505,28 @@ export default function App() {
     if (!scriptsLoaded || !isUnlocked || !s3Creds.bucket) return;
     const run = async () => {
       const client = getS3Client();
-      if (client) {
-        try {
-          const { synced } = await syncPendingUploads(client, s3Creds.bucket, setOperationStatus);
-          if (synced > 0) setOperationStatus(`대기 중이던 ${synced}개 파일 동기화 완료`);
-        } catch (e) {
-          console.error('Pending uploads sync failed:', e);
-        }
+      if (!client) return;
+      const pending = await getPendingUploads();
+      const indicatorId =
+        pending.length > 0
+          ? addIndicator({
+              id: 'sync-pending',
+              type: ActivityTypes.FILE_UPLOAD,
+              label: `${pending.length}개 대기 파일 동기화 중`,
+            })
+          : null;
+      try {
+        const { synced } = await syncPendingUploads(client, s3Creds.bucket, setOperationStatus);
+        if (synced > 0) setOperationStatus(`대기 중이던 ${synced}개 파일 동기화 완료`);
+      } catch (e) {
+        console.error('Pending uploads sync failed:', e);
+      } finally {
+        if (indicatorId) removeIndicator(indicatorId);
       }
       loadS3Files();
     };
     run();
-  }, [scriptsLoaded, isUnlocked, s3Creds.bucket, loadS3Files, getS3Client]);
+  }, [scriptsLoaded, isUnlocked, s3Creds.bucket, loadS3Files, getS3Client, addIndicator, removeIndicator]);
 
   // 녹음 목록 및 선택된 녹음 URL/sync 로드
   useEffect(() => {
@@ -1142,6 +1164,12 @@ export default function App() {
     const editableViewers = ['markdown', 'json', 'raw'];
     if (!editableViewers.includes(viewer)) return;
     setIsSaving(true);
+    const indicatorId = addIndicator({
+      id: 'note-save',
+      type: ActivityTypes.NOTE_PROCESSING,
+      label: '필기 저장 중',
+      detail: fileToSave.name,
+    });
     try {
       if (fileToSave.type === 's3') {
         const client = getS3Client();
@@ -1187,6 +1215,7 @@ export default function App() {
         alert('저장 실패: ' + e.message);
       }
     } finally {
+      removeIndicator(indicatorId);
       setIsSaving(false);
     }
   };
@@ -1366,6 +1395,11 @@ export default function App() {
     const { storageType, parentPath, parentDirHandle } = uploadTarget;
     setUploadTarget(null);
 
+    const indicatorId = addIndicator({
+      id: 'upload-file',
+      type: ActivityTypes.FILE_UPLOAD,
+      label: files.length > 1 ? `${files.length}개 파일 업로드 중` : '파일 업로드 중',
+    });
     try {
       if (storageType === 's3') {
         const client = getS3Client();
@@ -1400,6 +1434,7 @@ export default function App() {
     } catch (err) {
       alert('업로드 실패: ' + err.message);
     } finally {
+      removeIndicator(indicatorId);
       e.target.value = '';
     }
   };
@@ -1410,6 +1445,11 @@ export default function App() {
     const { storageType, parentPath, parentDirHandle } = uploadTarget;
     setUploadTarget(null);
 
+    const indicatorId = addIndicator({
+      id: 'upload-folder',
+      type: ActivityTypes.FILE_UPLOAD,
+      label: `${files.length}개 파일 업로드 중`,
+    });
     try {
       if (storageType === 's3') {
         const client = getS3Client();
@@ -1452,6 +1492,7 @@ export default function App() {
     } catch (err) {
       alert('폴더 업로드 실패: ' + err.message);
     } finally {
+      removeIndicator(indicatorId);
       e.target.value = '';
     }
   };
@@ -1824,6 +1865,12 @@ export default function App() {
 
     if (payload?.files?.length > 0 || payload?.dirHandles?.length > 0) {
       const { files = [], dirHandles = [] } = payload;
+      const totalItems = files.length + dirHandles.length;
+      const indicatorId = addIndicator({
+        id: 'drop-upload',
+        type: ActivityTypes.FILE_UPLOAD,
+        label: totalItems > 1 ? `${totalItems}개 항목 업로드 중` : '업로드 중',
+      });
       try {
         if (targetStorageType === 's3') {
           const client = getS3Client();
@@ -1895,6 +1942,8 @@ export default function App() {
       } catch (e) {
         alert('업로드 실패: ' + e.message);
         setOperationStatus(`업로드 실패: ${e.message}`);
+      } finally {
+        removeIndicator(indicatorId);
       }
     }
   };
@@ -2047,6 +2096,11 @@ export default function App() {
       if (result && currentFile?.type === 's3' && noteKey) {
         const client = getS3Client();
         if (client && s3Creds.bucket) {
+          const indicatorId = addIndicator({
+            id: 'recording-upload',
+            type: ActivityTypes.RECORDING,
+            label: '녹음 업로드 중',
+          });
           try {
             setRecordingPipelineStatus('업로드 중');
             await runEncodeAndUploadPipeline({
@@ -2060,6 +2114,7 @@ export default function App() {
           } catch (e) {
             alert('녹음 업로드 실패: ' + (e?.message || e));
           } finally {
+            removeIndicator(indicatorId);
             setRecordingPipelineStatus('');
           }
         }
@@ -2367,6 +2422,7 @@ export default function App() {
         {/* Status Bar */}
         <div className="h-6 md:h-7 border-t border-gray-200 dark:border-odp-borderSoft bg-white/90 dark:bg-odp-bgSoft/95 text-[10px] md:text-[11px] px-2 md:px-3 flex items-center justify-between gap-2 md:gap-3 shrink-0">
           <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1 overflow-hidden">
+            <ActivityIndicatorBar />
             <span className="truncate shrink-0 max-w-12 md:max-w-none" title={currentFile?.type === 's3' ? `S3 (${s3Creds.bucket || '-'})` : currentFile?.type === 'local' ? '로컬' : '없음'}>
               <span className="md:hidden">{currentFile?.type === 's3' ? 'S3' : currentFile?.type === 'local' ? '로컬' : '없음'}</span>
               <span className="hidden md:inline">저장소: {currentFile?.type === 's3' ? `S3 (${s3Creds.bucket || '-'})` : currentFile?.type === 'local' ? '로컬' : '없음'}</span>

@@ -30,6 +30,8 @@ import {
   Play,
   Pause,
   Eye,
+  Loader2,
+  PenLine,
 } from 'lucide-react';
 
 export const IconFolder = ({ size = 16, ...props }) => <Folder size={size} {...props} />;
@@ -63,3 +65,5 @@ export const IconSquare = ({ size = 16, ...props }) => <Square size={size} {...p
 export const IconPlay = ({ size = 16, ...props }) => <Play size={size} {...props} />;
 export const IconPause = ({ size = 16, ...props }) => <Pause size={size} {...props} />;
 export const IconEye = ({ size = 16, ...props }) => <Eye size={size} {...props} />;
+export const IconLoader = ({ size = 14, ...props }) => <Loader2 size={size} {...props} />;
+export const IconPenLine = ({ size = 14, ...props }) => <PenLine size={size} {...props} />;
