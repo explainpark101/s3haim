@@ -4,12 +4,22 @@ import { MdEditor, config } from 'md-editor-rt';
 import "@/styles/md-editor-rt/style.css";
 import KO_KR from '@vavt/cm-extension/dist/locale/ko-KR';
 import ExportPDF from '@/components/ExportPDF';
+import { lineNumbers } from '@codemirror/view';
 
 config({
   editorConfig: {
     languageUserDefined: {
       'ko-KR': KO_KR,
     },
+  },
+  codeMirrorExtensions(extensions) {
+    return [
+      ...extensions,
+      {
+        type: 'lineNumbers',
+        extension: lineNumbers(),
+      },
+    ];
   },
 });
 
